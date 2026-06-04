@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-final class ImageStorageManager {
+final class ImageStorageManager: @unchecked Sendable {
     static let shared = ImageStorageManager()
 
     private let storageRoot: URL

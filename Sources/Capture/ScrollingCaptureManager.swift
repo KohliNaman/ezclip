@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-final class ScrollingCaptureManager {
+final class ScrollingCaptureManager: @unchecked Sendable {
     static let shared = ScrollingCaptureManager()
 
     private let engine = ContextResolverEngine.shared

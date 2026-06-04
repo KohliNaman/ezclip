@@ -26,7 +26,7 @@ struct ResolvedContext {
 
 // MARK: - Engine
 
-final class ContextResolverEngine {
+final class ContextResolverEngine: @unchecked Sendable {
     static let shared = ContextResolverEngine()
 
     private let resolvers: [AppContextResolver]

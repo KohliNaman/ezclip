@@ -1,5 +1,5 @@
 @preconcurrency import AppKit
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 @MainActor
 final class ScreenCaptureManager: NSObject {

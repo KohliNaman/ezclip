@@ -17,12 +17,9 @@ extension Tag: TableRecord, FetchableRecord, MutablePersistableRecord {
 
 // MARK: - Join table
 
-struct CaptureTag: Codable, @unchecked Sendable {
+struct CaptureTag: Codable {
     var captureId: UUID
     var tagId: UUID
-
-    nonisolated(unsafe) static let capture = belongsTo(Capture.self)
-    nonisolated(unsafe) static let tag = belongsTo(Tag.self)
 }
 
 extension CaptureTag: TableRecord, FetchableRecord, MutablePersistableRecord {

@@ -69,32 +69,10 @@ extension Capture: TableRecord, FetchableRecord, MutablePersistableRecord {
     enum Columns {
         static let id = Column(CodingKeys.id)
         static let timestamp = Column(CodingKeys.timestamp)
-        static let appName = Column(CodingKeys.appName)
-        static let appBundleId = Column(CodingKeys.appBundleId)
-        static let windowTitle = Column(CodingKeys.windowTitle)
-        static let screenshotPath = Column(CodingKeys.screenshotPath)
-        static let thumbnailPath = Column(CodingKeys.thumbnailPath)
         static let contextType = Column(CodingKeys.contextType)
-        static let url = Column(CodingKeys.url)
-        static let pageTitle = Column(CodingKeys.pageTitle)
-        static let faviconPath = Column(CodingKeys.faviconPath)
-        static let songName = Column(CodingKeys.songName)
-        static let artistName = Column(CodingKeys.artistName)
-        static let albumName = Column(CodingKeys.albumName)
-        static let albumArtPath = Column(CodingKeys.albumArtPath)
-        static let designFileName = Column(CodingKeys.designFileName)
-        static let designPageName = Column(CodingKeys.designPageName)
-        static let filePath = Column(CodingKeys.filePath)
-        static let notes = Column(CodingKeys.notes)
-        static let collectionId = Column(CodingKeys.collectionId)
+        static let appName = Column(CodingKeys.appName)
         static let isScrolling = Column(CodingKeys.isScrolling)
-        static let scrollIndex = Column(CodingKeys.scrollIndex)
         static let parentCaptureId = Column(CodingKeys.parentCaptureId)
+        static let collectionId = Column(CodingKeys.collectionId)
     }
-
-    nonisolated(unsafe) static let tags = hasMany(
-        Tag.self,
-        through: CaptureTag.self,
-        using: CaptureTag.capture
-    )
 }

@@ -25,16 +25,14 @@ xcodebuild archive \
   -scheme ezclip \
   -configuration Release \
   -archivePath "$ARCHIVE_PATH" \
-  ONLY_ACTIVE_ARCH=NO \
-  | xcpretty
+  ONLY_ACTIVE_ARCH=NO
 
 # Export .app from archive
 echo "==> Exporting .app"
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE_PATH" \
   -exportPath build/ \
-  -exportOptionsPlist Scripts/ExportOptions.plist \
-  | xcpretty
+  -exportOptionsPlist Scripts/ExportOptions.plist
 
 # Package as DMG
 if command -v create-dmg &> /dev/null; then

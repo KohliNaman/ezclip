@@ -1,4 +1,4 @@
-import AppKit
+@preconcurrency import AppKit
 import Carbon
 
 final class HotkeyManager: @unchecked Sendable {

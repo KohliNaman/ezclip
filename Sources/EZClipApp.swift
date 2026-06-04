@@ -1,5 +1,5 @@
 import SwiftUI
-import AppKit
+@preconcurrency import AppKit
 import Combine
 
 @main
@@ -8,7 +8,6 @@ struct EZClipApp: App {
     @StateObject private var libraryViewModel = LibraryViewModel()
 
     var body: some Scene {
-        // Main library window
         Window("ezclip", id: "main") {
             LibraryView()
                 .environmentObject(libraryViewModel)
@@ -26,7 +25,6 @@ struct EZClipApp: App {
             }
         }
 
-        // Settings window
         Settings {
             SettingsView()
                 .environmentObject(libraryViewModel)
@@ -34,16 +32,15 @@ struct EZClipApp: App {
     }
 }
 
-// MARK: - App Delegate (Menu Bar + Hotkey + Lifecycle)
+// MARK: - App Delegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var menuBarViewModel = LibraryViewModel()
-    private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 1. Set up database
+        // Set up database
         do {
             try DatabaseManager.shared.setup()
             print("✅ Database ready")
@@ -56,20 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCent
             alert.runModal()
         }
 
-        // 2. Set up menu bar
+        // Menu bar
         setupMenuBar()
 
-        // 3. Register global hotkey
+        // Hotkey
         HotkeyManager.shared.register {
-            Task { @MainActor in
-                await CaptureOrchestrator.shared.capture()
-            }
+            Task { await CaptureOrchestrator.shared.capture() }
         }
 
-        // 4. Set up notifications
-        NSUserNotificationCenter.default.delegate = self
-
-        // 5. Hide Dock icon? No — we want both menu bar + dock
+        // Dock icon
         NSApp.setActivationPolicy(.regular)
 
         print("🚀 ezclip ready — double-tap ⌘ to capture")
@@ -81,7 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCent
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            // No windows open — show the main window
             if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
                 window.makeKeyAndOrderFront(nil)
             }
@@ -91,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCent
 
     // MARK: - Menu Bar
 
+    @MainActor
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -111,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCent
         )
     }
 
+    @MainActor
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
 
@@ -118,27 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSUserNotificationCent
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-
-            // Refresh menu bar data
             Task { await menuBarViewModel.loadAll() }
-
-            // Ensure popover stays on top
             popover.contentViewController?.view.window?.makeKey()
-        }
-    }
-
-    // MARK: - Notifications
-
-    func userNotificationCenter(
-        _ center: NSUserNotificationCenter,
-        didActivate notification: NSUserNotification
-    ) {
-        // Open main window when user clicks notification
-        if notification.activationType == .actionButtonClicked {
-            if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
-                window.makeKeyAndOrderFront(nil)
-            }
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 }

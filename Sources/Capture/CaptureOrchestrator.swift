@@ -1,4 +1,4 @@
-import AppKit
+@preconcurrency import AppKit
 import Foundation
 import UserNotifications
 
@@ -20,10 +20,10 @@ final class CaptureOrchestrator: @unchecked Sendable {
 
     func capture() async {
         do {
-            // 1. Capture screenshot (MainActor since it touches AppKit)
-            let (image, windowInfo) = try await MainActor.run {
+            // 1. Capture screenshot on MainActor
+            let (image, windowInfo) = try await Task { @MainActor in
                 try await captureManager.captureFrontmostWindow()
-            }
+            }.value
 
             // 2. Create capture ID
             let captureId = UUID()
@@ -83,7 +83,7 @@ final class CaptureOrchestrator: @unchecked Sendable {
             let autoTags = deriveAutoTags(from: capture)
             if !autoTags.isEmpty {
                 let tags = try await db.ensureTagsExist(autoTags)
-                try await db.linkTags(tags.map(\.id), to: captureId)
+                try await db.linkTags(tags.map({ $0.id }), to: captureId)
             }
 
             // 9. Notify
@@ -125,7 +125,7 @@ final class CaptureOrchestrator: @unchecked Sendable {
 
             let (fullPath, thumbPath) = try storage.saveScreenshot(stitched, captureId: parentId)
 
-            let parent = Capture(
+            var parent = Capture(
                 id: parentId,
                 timestamp: Date(),
                 appName: frontApp.localizedName ?? "Browser",
@@ -149,7 +149,7 @@ final class CaptureOrchestrator: @unchecked Sendable {
                 let childId = UUID()
                 let (sliceFull, sliceThumb) = try storage.saveScreenshot(slice, captureId: childId)
 
-                let child = Capture(
+                var child = Capture(
                     id: childId,
                     timestamp: Date(),
                     appName: frontApp.localizedName ?? "Browser",
@@ -186,7 +186,7 @@ final class CaptureOrchestrator: @unchecked Sendable {
 
     func delete(_ capture: Capture) async throws {
         try storage.deleteImages(for: capture)
-        try await db.write { db in
+        try await db.write { [self] db in
             if capture.isScrolling {
                 let children = try Capture
                     .filter(sql: "parentCaptureId = ?", arguments: [capture.id.uuidString])

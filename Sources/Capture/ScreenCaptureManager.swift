@@ -1,4 +1,4 @@
-import AppKit
+@preconcurrency import AppKit
 import ScreenCaptureKit
 
 final class ScreenCaptureManager: NSObject, @unchecked Sendable {

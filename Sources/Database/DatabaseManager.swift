@@ -110,7 +110,7 @@ final class DatabaseManager: @unchecked Sendable {
                     try existing.update(db)
                     tags.append(existing)
                 } else {
-                    let tag = Tag(id: UUID(), name: trimmed, usageCount: 1)
+                    var tag = Tag(id: UUID(), name: trimmed, usageCount: 1)
                     try tag.insert(db)
                     tags.append(tag)
                 }
@@ -122,7 +122,7 @@ final class DatabaseManager: @unchecked Sendable {
     func linkTags(_ tagIds: [UUID], to captureId: UUID) async throws {
         try await write { db in
             for tagId in tagIds {
-                let ct = CaptureTag(captureId: captureId, tagId: tagId)
+                var ct = CaptureTag(captureId: captureId, tagId: tagId)
                 try ct.insert(db)
             }
         }

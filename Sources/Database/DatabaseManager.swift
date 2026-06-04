@@ -1,7 +1,8 @@
 import Foundation
 import GRDB
 
-final class DatabaseManager: @unchecked Sendable {
+@MainActor
+final class DatabaseManager {
     static let shared = DatabaseManager()
 
     private var dbQueue: DatabaseQueue!

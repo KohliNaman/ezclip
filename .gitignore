@@ -1,0 +1,45 @@
+##
+##  Copyright (c) 2026 ezclip
+##  MIT License
+##
+##  Don't forget to generate the list with:
+##    git ls-files -oi --exclude-standard
+##  after a `git add` / `git commit` cycle.
+##
+################################################################################
+
+# Xcode / Swift
+.build/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+Pods/
+
+# Swift Package Manager
+Packages/
+Package.resolved
+
+# macOS
+.DS_Store
+*.app
+*.dmg
+.Spotlight-V100
+.Trashes
+
+# Build artifacts
+build/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Secrets
+.env
+*.private.env

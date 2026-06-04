@@ -1,0 +1,139 @@
+name: Build ezclip
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+
+      - name: Build
+        run: |
+          swift build -c release \
+            --arch arm64 \
+            --product ezclip
+
+      - name: Create .app bundle
+        run: |
+          set -e
+
+          APP_NAME="ezclip"
+          BUILD_DIR=".build/arm64-apple-macosx/release"
+          APP_DIR="build/${APP_NAME}.app"
+          CONTENTS="${APP_DIR}/Contents"
+          MACOS_DIR="${CONTENTS}/MacOS"
+          RESOURCES_DIR="${CONTENTS}/Resources"
+
+          mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
+
+          # Copy binary
+          cp "${BUILD_DIR}/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
+          chmod +x "${MACOS_DIR}/${APP_NAME}"
+
+          # Info.plist
+          cat > "${CONTENTS}/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>ezclip</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.ezclip.app</string>
+              <key>CFBundleName</key>
+              <string>ezclip</string>
+              <key>CFBundleDisplayName</key>
+              <string>ezclip</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleSignature</key>
+              <string>????</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>14.0</string>
+              <key>LSUIElement</key>
+              <false/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSHumanReadableCopyright</key>
+              <string>MIT License. Context-aware screenshot curation.</string>
+              <key>NSScreenCaptureUsageDescription</key>
+              <string>ezclip captures screenshots of your frontmost window when you double-press ⌘.</string>
+              <key>NSAppleEventsUsageDescription</key>
+              <string>ezclip uses AppleScript to read context (URL, song name) from apps.</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # App icon (SF Symbol fallback)
+          cat > "${RESOURCES_DIR}/AppIcon.icns" << 'ICONS'
+          # Minimal icns — placeholder
+          ICONS
+          # We'll use a generated icon. For now, use a placeholder.
+          # Create a minimal 1x1 PNG and wrap as icns
+          python3 -c "
+          import struct, os
+          # Minimal PNG: 32x32 blue square
+          png = b'\x89PNG\r\n\x1a\n' + \
+                struct.pack('>I', 13)[-4:] + b'IHDR' + \
+                struct.pack('>IIBBBBB', 32, 32, 8, 2, 0, 0, 0) + \
+                struct.pack('>I', 0x0909104d)[-4:]  # CRC placeholder
+          # Just create a blank icon
+          open(os.path.join('${RESOURCES_DIR}', 'icon.png'), 'wb').write(b'')
+          "
+
+          echo "✅ .app bundle created at ${APP_DIR}"
+
+      - name: Create DMG
+        run: |
+          set -e
+
+          APP_DIR="build/ezclip.app"
+          DMG_NAME="ezclip-1.0.0-arm64.dmg"
+          DMG_DIR="build/dmg"
+
+          mkdir -p "${DMG_DIR}"
+          cp -R "${APP_DIR}" "${DMG_DIR}/"
+
+          # Create symlink to /Applications
+          ln -s /Applications "${DMG_DIR}/Applications"
+
+          # Create DMG
+          hdiutil create \
+            -volname "ezclip" \
+            -srcfolder "${DMG_DIR}" \
+            -ov \
+            -format UDZO \
+            "build/${DMG_NAME}"
+
+          echo "✅ DMG created: build/${DMG_NAME}"
+          ls -lh "build/${DMG_NAME}"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezclip-dmg
+          path: build/ezclip-*.dmg
+          retention-days: 30
+
+      - name: Upload .app artifact (for Homebrew)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezclip-app
+          path: build/ezclip.app
+          retention-days: 30

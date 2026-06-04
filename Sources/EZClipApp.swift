@@ -34,6 +34,7 @@ struct EZClipApp: App {
 
 // MARK: - App Delegate
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -82,7 +83,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu Bar
 
-    @MainActor
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -103,7 +103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    @MainActor
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
 

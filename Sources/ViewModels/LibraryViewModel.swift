@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import GRDB
 
 @MainActor
 final class LibraryViewModel: ObservableObject {
@@ -30,8 +31,8 @@ final class LibraryViewModel: ObservableObject {
         do {
             captures = try await db.read { db in
                 try Capture
-                    .filter(Capture.Columns.parentCaptureId == nil)
-                    .order(sortedColumn.desc)
+                    .filter(sql: "parentCaptureId IS NULL")
+                    .order(sql: sortOrder.orderSQL)
                     .fetchAll(db)
             }
             collections = try await db.read { db in
@@ -85,13 +86,6 @@ final class LibraryViewModel: ObservableObject {
         return results
     }
 
-    private var sortedColumn: Capture.Columns {
-        switch sortOrder {
-        case .newest, .oldest: Capture.Columns.timestamp
-        case .appName: Capture.Columns.appName
-        }
-    }
-
     func deleteCapture(_ capture: Capture) async {
         do {
             try await CaptureOrchestrator.shared.delete(capture)
@@ -115,7 +109,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func addCollection(name: String, color: String = "blue", icon: String = "folder") async {
-        let collection = Collection(
+        var collection = Collection(
             id: UUID(),
             name: name,
             color: color,
@@ -135,7 +129,7 @@ final class LibraryViewModel: ObservableObject {
     func assignToCollection(_ captureId: UUID, collectionId: UUID?) async {
         do {
             try await db.write { db in
-                if var capture = try Capture.fetchOne(db, id: captureId) {
+                if var capture = try Capture.fetchOne(db, key: captureId) {
                     capture.collectionId = collectionId
                     try capture.update(db)
                 }
@@ -143,6 +137,18 @@ final class LibraryViewModel: ObservableObject {
             await loadAll()
         } catch {
             print("Failed to assign collection: \(error)")
+        }
+    }
+}
+
+// MARK: - Sort order SQL
+
+private extension LibraryViewModel.SortOrder {
+    var orderSQL: String {
+        switch self {
+        case .newest: "timestamp DESC"
+        case .oldest: "timestamp ASC"
+        case .appName: "appName ASC"
         }
     }
 }

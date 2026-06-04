@@ -266,7 +266,7 @@ struct FilterPill: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(isSelected ? Color.accentColor : .quaternary.opacity(0.5))
+        .background(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary.opacity(0.5)))
         .foregroundStyle(isSelected ? .white : .primary)
         .cornerRadius(6)
         .contentShape(Rectangle())

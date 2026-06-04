@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-struct Tag: Identifiable, Codable {
+struct Tag: Identifiable, Codable, @unchecked Sendable {
     var id: UUID
     var name: String
     var usageCount: Int
@@ -13,22 +13,16 @@ extension Tag: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let name = Column(CodingKeys.name)
         static let usageCount = Column(CodingKeys.usageCount)
     }
-
-    static let captures = hasMany(
-        Capture.self,
-        through: CaptureTag.self,
-        using: CaptureTag.tag
-    )
 }
 
 // MARK: - Join table
 
-struct CaptureTag: Codable {
+struct CaptureTag: Codable, @unchecked Sendable {
     var captureId: UUID
     var tagId: UUID
 
-    static let capture = belongsTo(Capture.self)
-    static let tag = belongsTo(Tag.self)
+    nonisolated(unsafe) static let capture = belongsTo(Capture.self)
+    nonisolated(unsafe) static let tag = belongsTo(Tag.self)
 }
 
 extension CaptureTag: TableRecord, FetchableRecord, MutablePersistableRecord {

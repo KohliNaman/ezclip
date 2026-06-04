@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-struct Collection: Identifiable, Codable {
+struct Collection: Identifiable, Codable, @unchecked Sendable {
     var id: UUID
     var name: String
     var color: String
@@ -15,6 +15,4 @@ extension Collection: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let name = Column(CodingKeys.name)
         static let sortOrder = Column(CodingKeys.sortOrder)
     }
-
-    static let captures = hasMany(Capture.self)
 }

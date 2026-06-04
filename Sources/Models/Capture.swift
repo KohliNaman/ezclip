@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-struct Capture: Identifiable, Codable {
+struct Capture: Identifiable, Codable, @unchecked Sendable {
     var id: UUID
     var timestamp: Date
     var appName: String
@@ -92,10 +92,9 @@ extension Capture: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let parentCaptureId = Column(CodingKeys.parentCaptureId)
     }
 
-    static let tags = hasMany(
+    nonisolated(unsafe) static let tags = hasMany(
         Tag.self,
         through: CaptureTag.self,
         using: CaptureTag.capture
     )
-    static let collection = belongsTo(Collection.self)
 }

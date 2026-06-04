@@ -5,7 +5,7 @@ import Combine
 @main
 struct EZClipApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var libraryViewModel = LibraryViewModel()
+    @StateObject private var libraryViewModel: LibraryViewModel = .init()
 
     var body: some Scene {
         Window("ezclip", id: "main") {

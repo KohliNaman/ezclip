@@ -74,7 +74,7 @@ final class LibraryViewModel: ObservableObject {
             }
         }
 
-        switch sortOrder {
+        switch self.sortOrder {
         case .newest:
             results.sort { $0.timestamp > $1.timestamp }
         case .oldest:

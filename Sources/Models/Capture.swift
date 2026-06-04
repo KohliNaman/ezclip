@@ -96,5 +96,5 @@ extension Capture: TableRecord, FetchableRecord, MutablePersistableRecord {
         Tag.self,
         through: CaptureTag.self,
         using: CaptureTag.capture
-    )
+    ) as HasManyAssociation<Capture, Tag>
 }

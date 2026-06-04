@@ -12,7 +12,6 @@ final class CaptureOrchestrator: @unchecked Sendable {
     private let scrollingManager = ScrollingCaptureManager.shared
 
     private init() {
-        // Request notification permission
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -20,24 +19,27 @@ final class CaptureOrchestrator: @unchecked Sendable {
 
     func capture() async {
         do {
-            // 1. Capture screenshot on MainActor
-            let (image, windowInfo) = try await Task { @MainActor in
-                try await captureManager.captureFrontmostWindow()
+            // 1. Capture on MainActor, convert NSImage to Data before crossing actor
+            let captureData: (imageData: Data, windowInfo: WindowInfo, image: NSImage)
+            captureData = try await Task { @MainActor in
+                let (image, windowInfo) = try await captureManager.captureFrontmostWindow()
+                // Convert to Data while on MainActor
+                guard let tiffData = image.tiffRepresentation,
+                      let bitmap = NSBitmapImageRep(data: tiffData),
+                      let pngData = bitmap.representation(using: .png, properties: [:]) else {
+                    throw CaptureError.captureFailed
+                }
+                return (pngData, windowInfo, image)
             }.value
 
-            // 2. Create capture ID
             let captureId = UUID()
+            let (fullPath, thumbPath) = try storage.saveScreenshot(captureData.image, captureId: captureId)
 
-            // 3. Save images to disk
-            let (fullPath, thumbPath) = try storage.saveScreenshot(image, captureId: captureId)
-
-            // 4. Resolve context
             let context = await contextEngine.resolve(
-                bundleId: windowInfo.bundleId,
-                windowTitle: windowInfo.windowTitle
+                bundleId: captureData.windowInfo.bundleId,
+                windowTitle: captureData.windowInfo.windowTitle
             )
 
-            // 5. Save context images (favicon, album art)
             var faviconPath: String?
             if let favData = context.faviconData {
                 faviconPath = try? storage.saveData(favData, name: "\(captureId)_favicon")
@@ -47,13 +49,12 @@ final class CaptureOrchestrator: @unchecked Sendable {
                 albumArtPath = try? storage.saveData(artData, name: "\(captureId)_albumart")
             }
 
-            // 6. Build Capture
-            let capture = Capture(
+            var capture = Capture(
                 id: captureId,
                 timestamp: Date(),
-                appName: windowInfo.appName,
-                appBundleId: windowInfo.bundleId,
-                windowTitle: windowInfo.windowTitle,
+                appName: captureData.windowInfo.appName,
+                appBundleId: captureData.windowInfo.bundleId,
+                windowTitle: captureData.windowInfo.windowTitle,
                 screenshotPath: fullPath,
                 thumbnailPath: thumbPath,
                 contextType: context.contextType,
@@ -74,19 +75,16 @@ final class CaptureOrchestrator: @unchecked Sendable {
                 parentCaptureId: nil
             )
 
-            // 7. Save to DB
             try await db.write { db in
                 try capture.insert(db)
             }
 
-            // 8. Auto-tag
             let autoTags = deriveAutoTags(from: capture)
             if !autoTags.isEmpty {
                 let tags = try await db.ensureTagsExist(autoTags)
                 try await db.linkTags(tags.map({ $0.id }), to: captureId)
             }
 
-            // 9. Notify
             await MainActor.run {
                 NotificationCenter.default.post(name: .newCaptureCreated, object: capture)
                 showNotification(for: capture)
@@ -230,7 +228,7 @@ final class CaptureOrchestrator: @unchecked Sendable {
         return Array(Set(tags))
     }
 
-    // MARK: - Notifications (UserNotifications framework)
+    // MARK: - Notifications
 
     @MainActor
     private func showNotification(for capture: Capture) {
@@ -238,12 +236,12 @@ final class CaptureOrchestrator: @unchecked Sendable {
         content.title = "Captured!"
         content.subtitle = capture.contextDescription
         content.body = "\(capture.appName) — \(capture.contextType.displayName)"
-        content.sound = nil  // silent
+        content.sound = nil
 
         let request = UNNotificationRequest(
             identifier: capture.id.uuidString,
             content: content,
-            trigger: nil  // deliver immediately
+            trigger: nil
         )
 
         UNUserNotificationCenter.current().add(request) { error in

@@ -1,38 +1,5 @@
-import SwiftUI
 @preconcurrency import AppKit
-import Combine
-
-@main
-struct EZClipApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var libraryViewModel: LibraryViewModel = .init()
-
-    var body: some Scene {
-        Window("ezclip", id: "main") {
-            LibraryView()
-                .environmentObject(libraryViewModel)
-                .frame(minWidth: 800, minHeight: 500)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 960, height: 640)
-        .windowResizability(.contentSize)
-        .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("Capture Now") {
-                    Task { await CaptureOrchestrator.shared.capture() }
-                }
-                .keyboardShortcut("k", modifiers: [.command, .shift])
-            }
-        }
-
-        Settings {
-            SettingsView()
-                .environmentObject(libraryViewModel)
-        }
-    }
-}
-
-// MARK: - App Delegate
+import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -41,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarViewModel = LibraryViewModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Set up database
         do {
             try DatabaseManager.shared.setup()
             print("✅ Database ready")
@@ -54,15 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
 
-        // Menu bar
         setupMenuBar()
 
-        // Hotkey
         HotkeyManager.shared.register {
             Task { await CaptureOrchestrator.shared.capture() }
         }
 
-        // Dock icon
         NSApp.setActivationPolicy(.regular)
 
         print("🚀 ezclip ready — double-tap ⌘ to capture")

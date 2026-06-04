@@ -8,6 +8,17 @@
 ##
 ################################################################################
 
+# Xcode
+ezclip.xcodeproj/xcuserdata/
+ezclip.xcodeproj/project.xcworkspace/xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.xcarchive
+*.xcuserstate
+
 # Xcode / Swift
 .build/
 *.xcodeproj/

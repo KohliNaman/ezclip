@@ -1,7 +1,8 @@
 @preconcurrency import AppKit
 import ScreenCaptureKit
 
-final class ScreenCaptureManager: NSObject, @unchecked Sendable {
+@MainActor
+final class ScreenCaptureManager: NSObject {
     static let shared = ScreenCaptureManager()
 
     func captureFrontmostWindow() async throws -> (image: NSImage, windowInfo: WindowInfo) {

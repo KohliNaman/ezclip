@@ -1,7 +1,8 @@
 @preconcurrency import AppKit
 import Foundation
 
-final class ScrollingCaptureManager: @unchecked Sendable {
+@MainActor
+final class ScrollingCaptureManager {
     static let shared = ScrollingCaptureManager()
 
     private let engine = ContextResolverEngine.shared

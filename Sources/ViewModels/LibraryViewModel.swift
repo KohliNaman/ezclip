@@ -32,7 +32,7 @@ final class LibraryViewModel: ObservableObject {
             captures = try await db.read { db in
                 try Capture
                     .filter(sql: "parentCaptureId IS NULL")
-                    .order(sql: sortOrder.orderSQL)
+                    .order(sql: self.sortOrder.orderSQL)
                     .fetchAll(db)
             }
             collections = try await db.read { db in

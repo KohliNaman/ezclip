@@ -1,6 +1,6 @@
 @preconcurrency import AppKit
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 @MainActor
 final class CaptureOrchestrator {
@@ -12,7 +12,11 @@ final class CaptureOrchestrator {
     private let storage = ImageStorageManager.shared
     private let scrollingManager = ScrollingCaptureManager.shared
 
-    private init() {
+    nonisolated private init() {
+        // nonisolated: UNUserNotificationCenter callback fires on an arbitrary
+        // XPC queue, not the main actor. If this init were @MainActor (the default
+        // for this class), Swift 6 would trap when the callback lands on the wrong
+        // queue — even though the body is empty.
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 

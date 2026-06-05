@@ -1,5 +1,6 @@
 @preconcurrency import AppKit
 import SwiftUI
+import ScreenCaptureKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -8,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarViewModel = LibraryViewModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // ── Database ──
         do {
             try DatabaseManager.shared.setup()
             print("✅ Database ready")
@@ -22,13 +24,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuBar()
 
-        HotkeyManager.shared.register {
+        // ── Accessibility (required for double-press ⌘) ──
+        let tapOk = HotkeyManager.shared.register {
             Task { await CaptureOrchestrator.shared.capture() }
         }
 
+        if !tapOk {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.showAccessibilityAlert()
+            }
+        }
+
+        // ── Screen Recording (pre-flight; prompt on first capture attempt) ──
+        preflightScreenRecording()
+
         NSApp.setActivationPolicy(.regular)
 
-        print("🚀 ezclip ready — double-tap ⌘ to capture")
+        print("🚀 ezclip ready — double-tap LEFT ⌘ to capture")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -42,6 +54,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return true
+    }
+
+    // MARK: - Permission Prompts
+
+    private func showAccessibilityAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Access Required"
+        alert.informativeText = """
+        ezclip needs Accessibility access to detect the double-press LEFT ⌘ shortcut.
+
+        Open System Settings → Privacy & Security → Accessibility
+        Toggle ezclip ON, then restart the app.
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+            )
+        }
+    }
+
+    private func preflightScreenRecording() {
+        Task {
+            do {
+                _ = try await SCShareableContent.current
+                print("✅ Screen Recording permission: granted")
+            } catch {
+                print("⚠️ Screen Recording permission: not yet granted")
+                // The actual prompt will fire when the user first tries to capture.
+                // The CaptureOrchestrator handles the error with a user-friendly alert.
+            }
+        }
     }
 
     // MARK: - Menu Bar

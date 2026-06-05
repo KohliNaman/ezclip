@@ -61,12 +61,6 @@ struct LibraryView: View {
                     .frame(minWidth: 700, idealWidth: 800, minHeight: 600)
             }
             .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button(action: { withAnimation { columnVisibility = .all } }) {
-                        Image(systemName: "sidebar.left")
-                    }
-                }
-
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 4) {
                         // Scrolling capture button (only for browsers)

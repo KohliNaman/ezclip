@@ -61,12 +61,6 @@ struct LibraryView: View {
                     .frame(minWidth: 700, idealWidth: 800, minHeight: 600)
             }
             .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button(action: { withAnimation { columnVisibility = .all } }) {
-                        Image(systemName: "sidebar.left")
-                    }
-                }
-
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 4) {
                         // Scrolling capture button (only for browsers)
@@ -172,7 +166,7 @@ struct LibraryView: View {
         guard let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
             return false
         }
-        return ["com.apple.Safari", "com.google.Chrome"].contains(bundleId)
+        return ["com.apple.Safari", "com.google.Chrome", "app.zen-browser.zen"].contains(bundleId)
     }
 }
 

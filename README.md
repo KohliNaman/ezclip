@@ -26,19 +26,18 @@ Double-tap ⌘⌘ on any Mac window and ezclip captures a screenshot with rich c
 
 ## Requirements
 
-- macOS 14 Sonoma or later
-- Apple Silicon (M1/M2/M3/M4)
+- macOS 14 Sonoma or later (Apple Silicon and Intel)
 
 ## Install
 
 ### Download DMG
 
-Download the latest DMG from [Releases](https://github.com/namaankohli/ezclip/releases), open it, and drag ezclip to Applications.
+Download the latest DMG from [Releases](https://github.com/KohliNaman/ezclip/releases), open it, and drag ezclip to Applications.
 
 ### Build from source
 
 ```bash
-git clone https://github.com/namaankohli/ezclip.git
+git clone https://github.com/KohliNaman/ezclip.git
 cd ezclip
 ./Scripts/build.sh
 open build/

@@ -46,7 +46,7 @@ struct SettingsView: View {
                         }
                     }
 
-                Text("Double-press the Command key to capture the frontmost window.")
+                Text("Double-press the left Command key to capture the frontmost window.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.leading, 20)
@@ -61,6 +61,10 @@ struct SettingsView: View {
                             removeLoginItem()
                         }
                     }
+            }
+
+            Section("Updates") {
+                UpdaterSettingsView()
             }
 
             Section("Storage") {
@@ -145,12 +149,14 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text("Version 1.0.0")
+            Text("Version \(appVersion) (Build \(appBuild))")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
             Divider()
                 .padding(.vertical, 8)
+
+            UpdaterSettingsView()
 
             HStack(spacing: 4) {
                 Text("Double-tap")
@@ -163,6 +169,14 @@ struct SettingsView: View {
         }
         .padding(30)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+
+    private var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
     }
 
     // MARK: - Permission helpers
@@ -226,5 +240,78 @@ struct PermissionRow: View {
         .background(.quaternary.opacity(0.3))
         .cornerRadius(8)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Updater Settings
+
+struct UpdaterSettingsView: View {
+    @ObservedObject private var updater = UpdateChecker.shared
+    @State private var showInstallPrompt = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Current version:")
+                Text("\(updater.currentVersion) (build \(updater.currentBuild))")
+                    .foregroundColor(.secondary)
+            }
+            .font(.callout)
+
+            if updater.updateAvailable, let version = updater.remoteVersion {
+                HStack {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundColor(.accentColor)
+                    Text("Version \(version) available")
+                        .fontWeight(.medium)
+                }
+
+                if let notes = updater.remoteNotes {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(3)
+                }
+
+                Button("Install Update...") {
+                    showInstallPrompt = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else if updater.isChecking {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Checking for updates...")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Button("Check for Updates") {
+                    Task { await updater.checkForUpdates() }
+                }
+                .disabled(updater.isChecking)
+            }
+
+            if let error = updater.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+
+            #if DEBUG
+            Text("Updates are disabled in debug builds.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            #endif
+        }
+        .alert("Install Update?", isPresented: $showInstallPrompt) {
+            Button("Install & Restart") {
+                Task { await updater.downloadAndInstall() }
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("ezclip will download the new version, replace the current app, and restart. This takes a few seconds.")
+        }
     }
 }

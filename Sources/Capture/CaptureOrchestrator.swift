@@ -1,6 +1,6 @@
 @preconcurrency import AppKit
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 @MainActor
 final class CaptureOrchestrator {
@@ -13,6 +13,14 @@ final class CaptureOrchestrator {
     private let scrollingManager = ScrollingCaptureManager.shared
 
     private init() {
+        // Delegate to a nonisolated static method so the
+        // UNUserNotificationCenter callback doesn't inherit
+        // @MainActor isolation. The callback fires on an arbitrary
+        // XPC queue; inheriting MainActor causes a runtime trap.
+        Self.requestNotificationAuth()
+    }
+
+    private nonisolated static func requestNotificationAuth() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -75,6 +83,7 @@ final class CaptureOrchestrator {
 
             NotificationCenter.default.post(name: .newCaptureCreated, object: capture)
             showNotification(for: capture)
+            CaptureOverlay.shared.show()
 
             print("📸 Captured: \(capture.contextDescription)")
 

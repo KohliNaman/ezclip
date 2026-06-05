@@ -1,4 +1,4 @@
-name: Build ezclip
+name: Build
 
 on:
   push:
@@ -9,83 +9,125 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Cancel in-progress runs for the same PR/branch/tag when a new
+# push arrives — prevents the duplicate CI spam when a push
+# triggers both pull_request (via PR sync) and workflow_dispatch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 20
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+      - name: Install tools
+        run: brew install xcodegen
 
-      - name: Build
-        run: swift build -c release --arch arm64 --product ezclip
+      - name: Generate Xcode project
+        run: xcodegen generate
 
-      - name: Create .app bundle
+      # ── Debug build (fast, for PR checks) ──
+      - name: Build (Debug)
         run: |
-          set -e
-          APP_NAME="ezclip"
-          BUILD_DIR=".build/arm64-apple-macosx/release"
-          APP_DIR="build/${APP_NAME}.app"
-          CONTENTS="${APP_DIR}/Contents"
-          MACOS_DIR="${CONTENTS}/MacOS"
-          RESOURCES_DIR="${CONTENTS}/Resources"
-          mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
-          cp "${BUILD_DIR}/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
-          chmod +x "${MACOS_DIR}/${APP_NAME}"
-          cat > "${CONTENTS}/Info.plist" << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>ezclip</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.ezclip.app</string>
-              <key>CFBundleName</key>
-              <string>ezclip</string>
-              <key>CFBundleDisplayName</key>
-              <string>ezclip</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleSignature</key>
-              <string>????</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>14.0</string>
-              <key>LSUIElement</key>
-              <false/>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSHumanReadableCopyright</key>
-              <string>MIT License. Context-aware screenshot curation.</string>
-              <key>NSScreenCaptureUsageDescription</key>
-              <string>ezclip captures screenshots of your frontmost window when you double-press ⌘.</string>
-              <key>NSAppleEventsUsageDescription</key>
-              <string>ezclip uses AppleScript to read context (URL, song name) from apps.</string>
-          </dict>
-          </plist>
-          PLIST
-          echo "✅ .app bundle created at ${APP_DIR}"
+          xcodebuild build \
+            -project ezclip.xcodeproj \
+            -scheme ezclip \
+            -configuration Debug \
+            -destination "platform=macOS" \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES
 
-      - name: Create DMG
+      # ── Release build + DMG ──
+      - name: Build Release
         run: |
-          set -e
-          APP_DIR="build/ezclip.app"
-          DMG_NAME="ezclip-1.0.0-arm64.dmg"
-          DMG_DIR="build/dmg"
-          mkdir -p "${DMG_DIR}"
-          cp -R "${APP_DIR}" "${DMG_DIR}/"
-          ln -s /Applications "${DMG_DIR}/Applications"
-          hdiutil create -volname "ezclip" -srcfolder "${DMG_DIR}" -ov -format UDZO "build/${DMG_NAME}"
-          echo "✅ DMG created: build/${DMG_NAME}"
-          ls -lh "build/${DMG_NAME}"
+          xcodebuild build \
+            -project ezclip.xcodeproj \
+            -scheme ezclip \
+            -configuration Release \
+            -derivedDataPath .build \
+            -destination "platform=macOS" \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            OTHER_CODE_SIGN_FLAGS="--deep"
+
+      - name: Verify code signature
+        run: |
+          APP_PATH=$(find .build/Build/Products/Release -name "ezclip.app" -type d | head -1)
+          echo "App bundle: $APP_PATH"
+          codesign -dvvv "$APP_PATH" 2>&1 || true
+          if [ -d "$APP_PATH/Contents/_CodeSignature" ]; then
+            echo "✅ Ad-hoc code signature present"
+          else
+            echo "❌ NO code signature directory"
+            exit 1
+          fi
+
+      - name: Package DMG
+        run: |
+          APP_PATH=$(find .build/Build/Products/Release -name "ezclip.app" -type d | head -1)
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
+          ARCH=$(uname -m)
+
+          DMG_NAME="ezclip-${VERSION}-${ARCH}.dmg"
+          DMG_STAGING="build/dmg-staging"
+          mkdir -p "$DMG_STAGING"
+
+          cp -R "$APP_PATH" "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+
+          mkdir -p build
+          hdiutil create \
+            -volname "ezclip" \
+            -srcfolder "$DMG_STAGING" \
+            -ov \
+            -format UDZO \
+            "build/$DMG_NAME"
+
+          echo "✅ DMG: build/$DMG_NAME"
+          ls -lh "build/$DMG_NAME"
+          echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
+
+      # ── Update latest.json (release only) ──
+      - name: Update latest.json
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION_CLEAN="${VERSION#v}"
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist)
+          DMG_URL="https://github.com/KohliNaman/ezclip/releases/download/${VERSION}/${DMG_NAME}"
+
+          cat > latest.json << JSONEOF
+          {
+            "version": "${VERSION_CLEAN}",
+            "build": "${BUILD}",
+            "url": "${DMG_URL}",
+            "notes": "Update available. See GitHub Releases for details."
+          }
+          JSONEOF
+
+          echo "✅ latest.json updated:"
+          cat latest.json
+
+      - name: Commit and push latest.json
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          git config user.name "ezclip-bot"
+          git config user.email "bot@ezclip.app"
+          git config credential.helper '!gh auth git-credential'
+
+          git add latest.json
+          git commit -m "latest.json: ${{ github.event.release.tag_name }}" || echo "No changes"
+          git push origin HEAD:main || echo "Push failed (branch protection?)"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -95,8 +137,10 @@ jobs:
           retention-days: 30
 
       - name: Upload DMG to release
-        if: github.event_name == 'release'
+        if: ${{ github.event_name == 'release' }}
         run: |
-          gh release upload ${{ github.event.release.tag_name }} build/ezclip-*.dmg --clobber
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "build/$DMG_NAME" \
+            --clobber
         env:
           GH_TOKEN: ${{ github.token }}

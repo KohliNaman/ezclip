@@ -36,6 +36,7 @@ final class ContextResolverEngine: @unchecked Sendable {
             SafariResolver(),
             ChromeResolver(),
             ArcResolver(),
+            ZenResolver(),
             SpotifyResolver(),
             AppleMusicResolver(),
             FigmaResolver(),
@@ -87,8 +88,10 @@ final class ContextResolverEngine: @unchecked Sendable {
     }
 
     func runAppleScriptAsync(_ source: String, timeout: TimeInterval = 3) async -> String? {
+        // NSAppleScript MUST run on the main thread — dispatching to a background
+        // queue causes EXC_BREAKPOINT / SIGTRAP crashes on macOS 14+.
         await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
+            DispatchQueue.main.async {
                 let result = self.runAppleScript(source, timeout: timeout)
                 continuation.resume(returning: result)
             }

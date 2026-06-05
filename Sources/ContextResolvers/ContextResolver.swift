@@ -11,7 +11,7 @@ protocol AppContextResolver {
 // MARK: - Result
 
 struct ResolvedContext {
-    let contextType: ContextType
+    var contextType: ContextType
     var url: String?
     var pageTitle: String?
     var faviconData: Data?

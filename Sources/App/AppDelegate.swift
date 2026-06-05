@@ -23,20 +23,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuBar()
 
-        // ── Accessibility (required for double-press LEFT ⌘) ──
+        // ── Set up double-press hotkey ──
         let tapOk = HotkeyManager.shared.register {
             Task { await CaptureOrchestrator.shared.capture() }
         }
 
         if !tapOk {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.showAccessibilityAlert()
+                self?.showPermissionAlert()
             }
         }
 
         NSApp.setActivationPolicy(.regular)
 
-        print("🚀 ezclip ready — double-tap LEFT ⌘ to capture")
+        let status = HotkeyManager.shared.isActive ? "✅ hotkey active" : "⚠️ hotkey inactive"
+        let reason = HotkeyManager.shared.failureReason.map { " — \($0)" } ?? ""
+        print("🚀 ezclip ready — \(status)\(reason)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -52,18 +54,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    // MARK: - Permission Prompts
+    // MARK: - Permission Prompt
 
-    private func showAccessibilityAlert() {
+    private func showPermissionAlert() {
+        let trusted = HotkeyManager.isAccessibilityTrusted()
+        let reason = HotkeyManager.shared.failureReason ?? "unknown"
+
         let alert = NSAlert()
-        alert.messageText = "Accessibility Access Required"
-        alert.informativeText = """
-        ezclip needs Accessibility access to detect the double-press LEFT ⌘ shortcut.
 
-        Open System Settings → Privacy & Security → Accessibility
-        Toggle ezclip ON, then restart the app.
-        """
-        alert.alertStyle = .warning
+        if trusted {
+            // Accessibility IS granted but the event tap still failed.
+            // This happens on macOS 26 betas, or when there are stale entries
+            // from previous ezclip installs with different code signatures.
+            alert.messageText = "Hotkey Not Working"
+            alert.informativeText = """
+            ezclip has Accessibility permission but the keyboard listener failed to start.
+
+            This can happen if:
+            • A previous ezclip version's entry is still in the Accessibility list
+            • macOS 26 is blocking the event tap (known beta issue)
+
+            Fix: Open System Settings → Privacy & Security → Accessibility,
+            select ALL ezclip entries and click the minus (−) button to remove them.
+            Then restart ezclip and re-grant permission when prompted.
+
+            Technical: \(reason)
+            """
+            alert.alertStyle = .warning
+        } else {
+            alert.messageText = "Accessibility Access Required"
+            alert.informativeText = """
+            ezclip needs Accessibility access to detect the double-press LEFT ⌘ shortcut.
+
+            Open System Settings → Privacy & Security → Accessibility
+            and toggle ezclip ON.
+
+            If ezclip is already ON but greyed out, remove it with the minus (−)
+            button, then add it again by dragging ezclip from /Applications.
+            """
+            alert.alertStyle = .warning
+        }
+
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Later")
         if alert.runModal() == .alertFirstButtonReturn {

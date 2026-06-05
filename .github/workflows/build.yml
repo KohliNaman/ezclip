@@ -23,7 +23,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # ── Debug build (fast, for PR checks) ──
+      # ── Quick build (for PR check speed) ──
       - name: Build (Debug)
         run: |
           xcodebuild build \
@@ -36,9 +36,8 @@ jobs:
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES
 
-      # ── Release build + DMG (on push, release, or manual dispatch) ──
+      # ── Release build + DMG (always, since build matrix is small) ──
       - name: Build Release
-        if: github.event_name != 'pull_request'
         run: |
           xcodebuild build \
             -project ezclip.xcodeproj \
@@ -53,27 +52,23 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--deep"
 
       - name: Verify code signature
-        if: github.event_name != 'pull_request'
         run: |
           APP_PATH=$(find .build/Build/Products/Release -name "ezclip.app" -type d | head -1)
           echo "App bundle: $APP_PATH"
           echo "---"
           codesign -dvvv "$APP_PATH" 2>&1 || true
           echo "---"
-          # Check that _CodeSignature exists
           if [ -d "$APP_PATH/Contents/_CodeSignature" ]; then
             echo "✅ Ad-hoc code signature present"
           else
-            echo "❌ NO code signature directory — DMG will trigger Gatekeeper 'damaged' error"
+            echo "❌ NO code signature directory"
             exit 1
           fi
 
       - name: Package DMG
-        if: github.event_name != 'pull_request'
         run: |
           APP_PATH=$(find .build/Build/Products/Release -name "ezclip.app" -type d | head -1)
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
-          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
           ARCH=$(uname -m)
 
           DMG_NAME="ezclip-${VERSION}-${ARCH}.dmg"
@@ -93,12 +88,9 @@ jobs:
 
           echo "✅ DMG: build/$DMG_NAME"
           ls -lh "build/$DMG_NAME"
-
-          # Set output for later steps
           echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
 
       - name: Upload DMG artifact
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ezclip-dmg
@@ -106,7 +98,7 @@ jobs:
           retention-days: 30
 
       - name: Upload DMG to release
-        if: github.event_name == 'release'
+        if: ${{ github.event_name == 'release' }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
             "build/$DMG_NAME" \

@@ -9,6 +9,13 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Cancel in-progress runs for the same PR/branch/tag when a new
+# push arrives — prevents the duplicate CI spam when a push
+# triggers both pull_request (via PR sync) and workflow_dispatch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-15

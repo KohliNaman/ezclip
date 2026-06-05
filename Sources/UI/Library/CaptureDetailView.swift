@@ -1,9 +1,16 @@
 import SwiftUI
+import AppKit
 
 /// Full-size detail view for a single capture. Supports:
-/// - Arrow-key gallery navigation (← → to browse captures)
-/// - Escape or click-on-image to dismiss
-/// - Full metadata, notes, and context display
+/// - Arrow-key gallery navigation (← →), even when text fields have focus
+/// - Escape to dismiss (from anywhere, including focused TextEditor)
+/// - Click on image to dismiss
+/// - "X" close button
+/// - Gallery position indicator with prev/next buttons
+///
+/// Uses NSEvent.addLocalMonitorForEvents to intercept keys at the window
+/// level — bypasses SwiftUI's focus system entirely. The TextEditor can
+/// have keyboard focus and arrow keys still navigate captures.
 struct CaptureDetailView: View {
     let capture: Capture
     @Environment(\.dismiss) private var dismiss
@@ -12,71 +19,93 @@ struct CaptureDetailView: View {
     @State private var fullImage: NSImage?
     @State private var notes: String = ""
     @State private var isEditingNotes = false
+    @State private var eventMonitor: Any?
 
     /// Index of this capture in the view model's filtered list.
     private var currentIndex: Int? {
         viewModel.filteredCaptures.firstIndex(where: { $0.id == capture.id })
     }
 
-    /// Total captures available for navigation.
     private var totalCount: Int {
         viewModel.filteredCaptures.count
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Toolbar ──
             toolbar
-
             Divider()
-
-            // ── Body ──
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Full image — tap to dismiss
                     imageView
 
-                    // Gallery position indicator
                     if let idx = currentIndex, totalCount > 1 {
                         galleryIndicator(current: idx, total: totalCount)
                     }
 
-                    // Context details
                     contextSection
-
-                    // Notes
                     notesSection
-
-                    // Metadata
                     metadataSection
                 }
                 .padding(20)
             }
         }
         .frame(minWidth: 700, idealWidth: 800, minHeight: 600)
-        .focusable()
-        .focusEffectDisabled()
-        .onKeyPress(.escape) {
-            dismiss()
-            return .handled
+        .onAppear {
+            installKeyMonitor()
         }
-        .onKeyPress(.leftArrow) {
-            navigateToPrevious()
-            return .handled
+        .onDisappear {
+            removeKeyMonitor()
         }
-        .onKeyPress(.rightArrow) {
-            navigateToNext()
-            return .handled
+        .onChange(of: capture.id) { _, _ in
+            // Capture changed via arrow-key navigation
+            fullImage = ImageStorageManager.shared.fullImage(for: capture)
+            notes = capture.notes ?? ""
+            isEditingNotes = false
         }
         .task {
             fullImage = ImageStorageManager.shared.fullImage(for: capture)
             notes = capture.notes ?? ""
         }
-        .onChange(of: capture.id) { _, _ in
-            // Reload when navigating to a different capture
-            fullImage = ImageStorageManager.shared.fullImage(for: capture)
-            notes = capture.notes ?? ""
-            isEditingNotes = false
+    }
+
+    // MARK: - NSEvent Key Monitor
+
+    /// Installs a local event monitor that intercepts keyDown events
+    /// before they reach any focused view. This ensures Escape and
+    /// arrow keys work even when the TextEditor has keyboard focus.
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Only intercept when no system modifier is held
+            // (Cmd, Option, Ctrl — let those pass through for system shortcuts)
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let hasModifiers = modifiers.contains(.command)
+                || modifiers.contains(.option)
+                || modifiers.contains(.control)
+
+            guard !hasModifiers else { return event }
+
+            switch Int(event.keyCode) {
+            case 53: // Escape
+                dismiss()
+                return nil
+            case 123: // Left arrow
+                navigateToPrevious()
+                return nil
+            case 124: // Right arrow
+                navigateToNext()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
         }
     }
 
@@ -95,7 +124,6 @@ struct CaptureDetailView: View {
 
             Spacer()
 
-            // Quick actions
             HStack(spacing: 8) {
                 if let url = capture.url, let nsurl = URL(string: url) {
                     Button(action: { NSWorkspace.shared.open(nsurl) }) {
@@ -135,7 +163,6 @@ struct CaptureDetailView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                // Explicit close button — always visible
                 Button {
                     dismiss()
                 } label: {
@@ -169,10 +196,6 @@ struct CaptureDetailView: View {
                     .onTapGesture {
                         dismiss()
                     }
-                    .onTapGesture(count: 2) {
-                        // Double-tap also dismisses (belt-and-suspenders)
-                        dismiss()
-                    }
             } else {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(.quaternary)
@@ -193,7 +216,6 @@ struct CaptureDetailView: View {
             }
             .buttonStyle(.plain)
             .disabled(current == 0)
-            .keyboardShortcut(.leftArrow, modifiers: [])
 
             Text("\(current + 1) of \(total)")
                 .font(.caption)
@@ -207,7 +229,6 @@ struct CaptureDetailView: View {
             }
             .buttonStyle(.plain)
             .disabled(current >= total - 1)
-            .keyboardShortcut(.rightArrow, modifiers: [])
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
@@ -217,16 +238,12 @@ struct CaptureDetailView: View {
 
     private func navigateToPrevious() {
         guard let idx = currentIndex, idx > 0 else { return }
-        let prevCapture = viewModel.filteredCaptures[idx - 1]
-        // Trigger a new detail view for the previous capture
-        // by dismissing and immediately setting selectedCapture
-        viewModel.selectedCapture = prevCapture
+        viewModel.selectedCapture = viewModel.filteredCaptures[idx - 1]
     }
 
     private func navigateToNext() {
         guard let idx = currentIndex, idx < totalCount - 1 else { return }
-        let nextCapture = viewModel.filteredCaptures[idx + 1]
-        viewModel.selectedCapture = nextCapture
+        viewModel.selectedCapture = viewModel.filteredCaptures[idx + 1]
     }
 
     // MARK: - Context Section
@@ -248,8 +265,7 @@ struct CaptureDetailView: View {
             case .file:
                 fileContext
             case .generic:
-                Text(capture.windowTitle)
-                    .font(.body)
+                Text(capture.windowTitle).font(.body)
             }
         }
         .padding(14)
@@ -260,9 +276,7 @@ struct CaptureDetailView: View {
     private var websiteContext: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let pageTitle = capture.pageTitle {
-                Text(pageTitle)
-                    .font(.body)
-                    .fontWeight(.medium)
+                Text(pageTitle).font(.body).fontWeight(.medium)
             }
             if let url = capture.url {
                 HStack(spacing: 6) {
@@ -337,11 +351,10 @@ struct CaptureDetailView: View {
     private var notesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Notes")
-                    .font(.headline)
+                Text("Notes").font(.headline)
                 Spacer()
                 if !notes.isEmpty {
-                    Button("Edit") { isEditingNotes.toggle() }
+                    Button("Done") { isEditingNotes = false }
                         .buttonStyle(.plain)
                         .font(.caption)
                 }
@@ -360,12 +373,6 @@ struct CaptureDetailView: View {
                             await viewModel.updateNotes(new, for: capture)
                         }
                     }
-
-                if !notes.isEmpty {
-                    Button("Done") { isEditingNotes = false }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
             } else {
                 Text(notes)
                     .font(.body)

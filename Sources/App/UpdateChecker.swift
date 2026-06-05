@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+@preconcurrency import AppKit
 
 /// Simple update checker that fetches a `latest.json` manifest from the repo.
 /// Compares the remote version with the current app version. If newer,
@@ -159,7 +160,7 @@ final class UpdateChecker: ObservableObject {
             let unmountTask = Process()
             unmountTask.launchPath = "/usr/bin/hdiutil"
             unmountTask.arguments = ["detach", mountPoint.path, "-quiet", "-force"]
-            unmountTask.run()
+            try unmountTask.run()
 
             // Clean up
             try? FileManager.default.removeItem(at: dmgPath)

@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import AppKit
 
 /// Resolves context from Zen Browser (Firefox fork).
 /// Zen doesn't expose an AppleScript dictionary, so we use System Events

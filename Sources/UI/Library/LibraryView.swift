@@ -4,6 +4,9 @@ struct LibraryView: View {
     @EnvironmentObject var viewModel: LibraryViewModel
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showingSettings = false
+    @State private var showDetail = false
+    @State private var detailCaptures: [Capture] = []
+    @State private var detailIndex: Int = 0
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -28,7 +31,7 @@ struct LibraryView: View {
                             ForEach(viewModel.filteredCaptures) { capture in
                                 CaptureCardView(capture: capture)
                                     .onTapGesture {
-                                        viewModel.selectedCapture = capture
+                                        openDetail(for: capture)
                                     }
                                     .contextMenu {
                                         Button("Open in Browser") {
@@ -56,9 +59,14 @@ struct LibraryView: View {
                     }
                 }
             }
-            .popover(item: $viewModel.selectedCapture) { capture in
-                CaptureDetailView(capture: capture)
-                    .frame(minWidth: 700, idealWidth: 800, minHeight: 600)
+            .popover(isPresented: $showDetail) {
+                if detailIndex < detailCaptures.count {
+                    SimpleDetailView(
+                        captures: detailCaptures,
+                        startIndex: detailIndex,
+                        onDismiss: { showDetail = false }
+                    )
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -156,6 +164,12 @@ struct LibraryView: View {
     }
 
     // MARK: - Helpers
+
+    private func openDetail(for capture: Capture) {
+        detailCaptures = viewModel.filteredCaptures
+        detailIndex = detailCaptures.firstIndex(where: { $0.id == capture.id }) ?? 0
+        showDetail = true
+    }
 
     private func openInBrowser(_ capture: Capture) {
         guard let urlStr = capture.url, let url = URL(string: urlStr) else { return }

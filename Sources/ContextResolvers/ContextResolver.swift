@@ -44,17 +44,37 @@ final class ContextResolverEngine: @unchecked Sendable {
     }
 
     func resolve(bundleId: String, windowTitle: String) async -> ResolvedContext {
+        var result: ResolvedContext
+
         // Try specific resolver first
         if let resolver = resolvers.first(where: { $0.supportedBundleIds.contains(bundleId) }) {
             do {
-                return try await resolver.resolve(windowTitle: windowTitle, bundleId: bundleId)
+                result = try await resolver.resolve(windowTitle: windowTitle, bundleId: bundleId)
             } catch {
                 print("⚠️ resolver failed for \(bundleId): \(error)")
+                result = inferContext(appName: "", windowTitle: windowTitle, bundleId: bundleId)
             }
+        } else {
+            result = inferContext(appName: "", windowTitle: windowTitle, bundleId: bundleId)
         }
 
-        // Fallback: infer from heuristics
-        return inferContext(appName: "", windowTitle: windowTitle, bundleId: bundleId)
+        // Universal fallback: if the resolver didn't find a URL but the
+        // window title contains one, extract it. Covers cases where
+        // AppleScript silently fails (-1728 no document, -1712 busy).
+        if result.url == nil, let extracted = extractURL(from: windowTitle) {
+            result.url = extracted
+            if result.contextType == .generic { result.contextType = .website }
+        }
+
+        return result
+    }
+
+    /// Extracts a URL from a window title string if one is present.
+    private func extractURL(from text: String) -> String? {
+        guard let range = text.range(of: "https?://[^\\s]+", options: .regularExpression) else {
+            return nil
+        }
+        return String(text[range])
     }
 
     private func inferContext(appName: String, windowTitle: String, bundleId: String) -> ResolvedContext {
@@ -78,10 +98,8 @@ final class ContextResolverEngine: @unchecked Sendable {
         let result = script?.executeAndReturnError(&error)
         if let error = error {
             let errNum = error[NSAppleScript.errorNumber] as? Int ?? 0
-            // -1712 = app busy (Spotify common), -1728 = no document (Safari common)
-            if errNum != -1712, errNum != -1728 {
-                print("⚠️ AppleScript [\(errNum)]: \(error[NSAppleScript.errorMessage] ?? "unknown")")
-            }
+            // Log all errors now — silencing -1728/-1712 was hiding real failures
+            print("⚠️ AppleScript [\(errNum)]: \(error[NSAppleScript.errorMessage] ?? "unknown")")
             return nil
         }
         return result?.stringValue

@@ -173,6 +173,24 @@ final class UpdateChecker: ObservableObject {
                 return
             }
 
+            // ── Reset TCC permissions for clean re-grant on next launch ──
+            // Every ad-hoc signed build has a unique code signature hash.
+            // macOS ties Accessibility/ScreenRecording perms to this hash,
+            // so reinstalling breaks them. Running tccutil reset clears the
+            // stale entries so the native macOS dialog appears on first boot.
+            print(\"🔑 Resetting stale TCC permissions...\")
+            let tccTask = Process()
+            tccTask.launchPath = \"/usr/bin/tccutil\"
+            tccTask.arguments = [\"reset\", \"Accessibility\", \"com.namaankohli.ezclip\"]
+            try? tccTask.run()
+            tccTask.waitUntilExit()
+
+            let tccTask2 = Process()
+            tccTask2.launchPath = \"/usr/bin/tccutil\"
+            tccTask2.arguments = [\"reset\", \"ScreenCapture\", \"com.namaankohli.ezclip\"]
+            try? tccTask2.run()
+            tccTask2.waitUntilExit()
+
             // Swap: move current app to temp, copy new app in place
             let currentAppURL = Bundle.main.bundleURL
             let oldAppURL = tempDir.appendingPathComponent("ezclip-old.app")

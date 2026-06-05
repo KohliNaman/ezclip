@@ -166,7 +166,7 @@ struct LibraryView: View {
         guard let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
             return false
         }
-        return ["com.apple.Safari", "com.google.Chrome"].contains(bundleId)
+        return ["com.apple.Safari", "com.google.Chrome", "app.zen-browser.zen"].contains(bundleId)
     }
 }
 

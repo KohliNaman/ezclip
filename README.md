@@ -1,59 +1,74 @@
 # ezclip
 
-**Context-aware screenshot curation for designers.**
+**Save screenshots with context. No more dead images in your camera roll.**
 
-Double-tap ⌘⌘ on any Mac window and ezclip captures a screenshot with rich context — website URLs, song names, Figma file names, and more. Save inspiration without losing the source.
+Double-tap ⌘⌘ (Command key) in any app and ezclip captures a screenshot — plus the link, song name, or file path that goes with it. Built for designers, researchers, and anyone who collects inspiration.
 
-## Features
+## What it does
 
-- **⌘⌘ hotkey** — double-tap Command to capture the frontmost window
-- **Context-aware** — auto-extracts URLs, page titles, song/artist names, Figma file names
-- **Scrolling screenshots** — full-page capture for Safari and Chrome
-- **Auto-tagging** — domain names, app names, artists become tags automatically
-- **Local library** — browse, search, filter by context type, add notes
-- **Menu bar + Dock** — always accessible, never in the way
-- **No cloud** — everything stored locally in `~/Library/Application Support/ezclip/`
+- **⌘⌘ to capture** — double-tap the left Command key. Works in any app.
+- **Saves the source** — website URL, page title, song + artist, Figma file name, folder path. ezclip remembers where things came from.
+- **Full-page scrolling captures** — for Safari, Chrome, and Zen Browser
+- **Auto-tags everything** — domain names, app names, artists become searchable tags
+- **Local library** — browse, search, filter by type. Add notes to captures.
+- **Gallery view** — arrow keys to flip through captures. Keyboard-friendly.
+- **Menu bar + Dock** — always there when you need it, hidden when you don't
+- **100% local** — nothing leaves your Mac. Data lives in `~/Library/Application Support/ezclip/`
 
-## How it works
+## What it captures
 
-| Capture from | What it saves |
+| App | Saves |
 |---|---|
-| Safari / Chrome / Arc | URL, page title, favicon |
-| Spotify / Apple Music | Song, artist, album, album art |
+| Safari, Chrome, Arc, Zen | URL, page title, favicon |
+| Spotify, Apple Music | Song, artist, album |
 | Figma | File name, page name |
 | Finder | Current folder path |
-| Anything else | App name, window title, timestamp |
+| Terminal, VS Code, etc. | App name, window title, timestamp |
 
 ## Requirements
 
-- macOS 14 Sonoma or later (Apple Silicon and Intel)
+- macOS 14 (Sonoma) or later
+- Works on Apple Silicon and Intel Macs
 
 ## Install
 
-### Download DMG
+1. Download the latest DMG from [Releases](https://github.com/KohliNaman/ezclip/releases/latest)
+2. Open the DMG and drag **ezclip** to your Applications folder
+3. Launch ezclip (right-click → Open the first time to bypass Gatekeeper)
+4. Grant **Screen Recording** and **Accessibility** permissions when prompted
 
-Download the latest DMG from [Releases](https://github.com/KohliNaman/ezclip/releases), open it, and drag ezclip to Applications.
+## Usage
 
-### Build from source
+- **Double-tap ⌘** (left Command) to capture the current window
+- Click any capture in the grid to see details, copy links, add notes
+- **Arrow keys** to browse captures in gallery mode
+- **Escape** or click the image to close detail view
+- Use the menu bar icon or Dock to open the library anytime
+
+## Why ezclip?
+
+macOS screenshots are dumb — they save pixels and nothing else. A week later you can't remember which website that cool design was from, or what song was playing. ezclip saves the context along with the image. No cloud, no subscriptions, no AI — just a fast, local tool that does one thing well.
+
+## Permissions
+
+ezclip needs two permissions to work:
+
+- **Screen Recording** — to capture window screenshots (System Settings → Privacy & Security → Screen Recording)
+- **Accessibility** — to detect the ⌘⌘ hotkey and read window titles (System Settings → Privacy & Security → Accessibility)
+
+You'll be prompted on first launch. You can manage these anytime in System Settings.
+
+## Building from source
 
 ```bash
 git clone https://github.com/KohliNaman/ezclip.git
 cd ezclip
-./Scripts/build.sh
-open build/
+brew install xcodegen
+xcodegen generate
+open ezclip.xcodeproj
 ```
 
-## Permissions
-
-On first launch, grant two permissions:
-1. **Screen Recording** — to capture window screenshots
-2. **Accessibility** — to read window titles and detect the ⌘⌘ hotkey
-
-Manage them anytime in System Settings → Privacy & Security.
-
-## Tech
-
-Built with Swift 6 + SwiftUI + GRDB. Uses ScreenCaptureKit, Accessibility APIs, and AppleScript for context extraction.
+Requires Xcode 16+ and Swift 6.
 
 ## License
 

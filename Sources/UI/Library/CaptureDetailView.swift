@@ -77,8 +77,10 @@ struct CaptureDetailView: View {
         removeKeyMonitor()
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // Only intercept when no system modifier is held
-            // (Cmd, Option, Ctrl — let those pass through for system shortcuts)
+            // Ignore auto-repeat events — holding an arrow key would
+            // otherwise skip through dozens of captures per second.
+            guard !event.isARepeat else { return event }
+
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let hasModifiers = modifiers.contains(.command)
                 || modifiers.contains(.option)

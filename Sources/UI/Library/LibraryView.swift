@@ -56,7 +56,7 @@ struct LibraryView: View {
                     }
                 }
             }
-            .sheet(item: $viewModel.selectedCapture) { capture in
+            .popover(item: $viewModel.selectedCapture) { capture in
                 CaptureDetailView(capture: capture)
                     .frame(minWidth: 700, idealWidth: 800, minHeight: 600)
             }

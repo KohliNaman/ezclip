@@ -23,22 +23,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuBar()
 
-        // ── Set up double-press hotkey ──
+        // ── Register hotkey ──
+        // AXIsProcessTrustedWithOptions() is called inside HotkeyManager.
+        // macOS shows its OWN native permission prompt automatically —
+        // we don't show custom alerts that would interfere with it.
         let tapOk = HotkeyManager.shared.register {
             Task { await CaptureOrchestrator.shared.capture() }
         }
 
+        // Log status only — no custom alert to interfere with native macOS dialogs.
+        // Every reinstall generates a new ad-hoc code signature hash, so macOS
+        // correctly requires re-granting permissions. That's expected behavior
+        // for unsigned apps and cannot be avoided without a paid Developer account.
         if !tapOk {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.showPermissionAlert()
-            }
+            let reason = HotkeyManager.shared.failureReason ?? "unknown"
+            print("⚠️ Hotkey inactive: \(reason)")
+            print("   → macOS will show its own Accessibility prompt. Grant it in System Settings.")
+        } else {
+            print("✅ Hotkey active")
         }
 
         NSApp.setActivationPolicy(.regular)
 
-        let status = HotkeyManager.shared.isActive ? "✅ hotkey active" : "⚠️ hotkey inactive"
-        let reason = HotkeyManager.shared.failureReason.map { " — \($0)" } ?? ""
-        print("🚀 ezclip ready — \(status)\(reason)")
+        print("🚀 ezclip ready")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -52,56 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return true
-    }
-
-    // MARK: - Permission Prompt
-
-    private func showPermissionAlert() {
-        let trusted = HotkeyManager.isAccessibilityTrusted()
-        let reason = HotkeyManager.shared.failureReason ?? "unknown"
-
-        let alert = NSAlert()
-
-        if trusted {
-            // Accessibility IS granted but the event tap still failed.
-            // This happens on macOS 26 betas, or when there are stale entries
-            // from previous ezclip installs with different code signatures.
-            alert.messageText = "Hotkey Not Working"
-            alert.informativeText = """
-            ezclip has Accessibility permission but the keyboard listener failed to start.
-
-            This can happen if:
-            • A previous ezclip version's entry is still in the Accessibility list
-            • macOS 26 is blocking the event tap (known beta issue)
-
-            Fix: Open System Settings → Privacy & Security → Accessibility,
-            select ALL ezclip entries and click the minus (−) button to remove them.
-            Then restart ezclip and re-grant permission when prompted.
-
-            Technical: \(reason)
-            """
-            alert.alertStyle = .warning
-        } else {
-            alert.messageText = "Accessibility Access Required"
-            alert.informativeText = """
-            ezclip needs Accessibility access to detect the double-press LEFT ⌘ shortcut.
-
-            Open System Settings → Privacy & Security → Accessibility
-            and toggle ezclip ON.
-
-            If ezclip is already ON but greyed out, remove it with the minus (−)
-            button, then add it again by dragging ezclip from /Applications.
-            """
-            alert.alertStyle = .warning
-        }
-
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.open(
-                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            )
-        }
     }
 
     // MARK: - Menu Bar

@@ -12,7 +12,7 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0-beta</string>
+    <string>0.4.0-beta</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundlePackageType</key>
@@ -29,11 +29,5 @@
     <string>ezclip needs screen recording permission to capture window screenshots.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>ezclip uses AppleScript to extract context from Safari, Spotify, and other apps.</string>
-    <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/KohliNaman/ezclip/main/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>__SPARKLE_PUBLIC_KEY_PLACEHOLDER__</string>
-    <key>SUEnableInstallerLauncherService</key>
-    <true/>
 </dict>
 </plist>

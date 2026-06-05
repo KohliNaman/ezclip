@@ -83,6 +83,7 @@ final class CaptureOrchestrator {
 
             NotificationCenter.default.post(name: .newCaptureCreated, object: capture)
             showNotification(for: capture)
+            CaptureOverlay.shared.show()
 
             print("📸 Captured: \(capture.contextDescription)")
 

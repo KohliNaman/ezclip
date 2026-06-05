@@ -246,27 +246,72 @@ struct PermissionRow: View {
 // MARK: - Updater Settings
 
 struct UpdaterSettingsView: View {
-    @ObservedObject private var updaterManager = UpdaterManager.shared
+    @ObservedObject private var updater = UpdateChecker.shared
+    @State private var showInstallPrompt = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { updaterManager.automaticallyChecksForUpdates },
-                set: { updaterManager.automaticallyChecksForUpdates = $0 }
-            )) {
-                Text("Automatically check for updates")
+            HStack {
+                Text("Current version:")
+                Text("\(updater.currentVersion) (build \(updater.currentBuild))")
+                    .foregroundColor(.secondary)
+            }
+            .font(.callout)
+
+            if updater.updateAvailable, let version = updater.remoteVersion {
+                HStack {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundColor(.accentColor)
+                    Text("Version \(version) available")
+                        .fontWeight(.medium)
+                }
+
+                if let notes = updater.remoteNotes {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(3)
+                }
+
+                Button("Install Update...") {
+                    showInstallPrompt = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else if updater.isChecking {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Checking for updates...")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Button("Check for Updates") {
+                    Task { await updater.checkForUpdates() }
+                }
+                .disabled(updater.isChecking)
             }
 
-            Button("Check for Updates...") {
-                updaterManager.checkForUpdates()
+            if let error = updater.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
             }
-            .disabled(!updaterManager.canCheckForUpdates)
 
             #if DEBUG
             Text("Updates are disabled in debug builds.")
                 .font(.caption)
                 .foregroundColor(.secondary)
             #endif
+        }
+        .alert("Install Update?", isPresented: $showInstallPrompt) {
+            Button("Install & Restart") {
+                Task { await updater.downloadAndInstall() }
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("ezclip will download the new version, replace the current app, and restart. This takes a few seconds.")
         }
     }
 }

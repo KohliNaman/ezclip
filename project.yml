@@ -11,9 +11,6 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: 6.29.0
-  Sparkle:
-    url: https://github.com/sparkle-project/Sparkle
-    from: 2.0.0
 
 targets:
   ezclip:
@@ -27,7 +24,6 @@ targets:
       - path: Resources
     dependencies:
       - package: GRDB
-      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclip

@@ -6,11 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var menuBarViewModel = LibraryViewModel()
-    private let updaterManager = UpdaterManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // ── Sparkle (must be early — before app finishes launching) ──
-        updaterManager.start()
         // ── Database ──
         do {
             try DatabaseManager.shared.setup()

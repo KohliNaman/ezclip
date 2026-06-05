@@ -36,6 +36,7 @@ final class ContextResolverEngine: @unchecked Sendable {
             SafariResolver(),
             ChromeResolver(),
             ArcResolver(),
+            ZenResolver(),
             SpotifyResolver(),
             AppleMusicResolver(),
             FigmaResolver(),

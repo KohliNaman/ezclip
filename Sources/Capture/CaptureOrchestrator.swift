@@ -12,11 +12,15 @@ final class CaptureOrchestrator {
     private let storage = ImageStorageManager.shared
     private let scrollingManager = ScrollingCaptureManager.shared
 
-    nonisolated private init() {
-        // nonisolated: UNUserNotificationCenter callback fires on an arbitrary
-        // XPC queue, not the main actor. If this init were @MainActor (the default
-        // for this class), Swift 6 would trap when the callback lands on the wrong
-        // queue — even though the body is empty.
+    private init() {
+        // Delegate to a nonisolated static method so the
+        // UNUserNotificationCenter callback doesn't inherit
+        // @MainActor isolation. The callback fires on an arbitrary
+        // XPC queue; inheriting MainActor causes a runtime trap.
+        Self.requestNotificationAuth()
+    }
+
+    private nonisolated static func requestNotificationAuth() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 

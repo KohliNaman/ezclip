@@ -12,7 +12,7 @@ on:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +20,25 @@ jobs:
       - name: Install tools
         run: brew install xcodegen
 
+      # ── Sparkle public key injection ──
+      # On releases: replace the placeholder in Info.plist with the real
+      # public key from GitHub secrets so Sparkle can verify update signatures.
+      - name: Inject Sparkle public key
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          if [ -n "$SPARKLE_PUBLIC_KEY" ]; then
+            /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_KEY" Resources/Info.plist
+            echo "✅ Sparkle public key injected"
+          else
+            echo "⚠️ SPARKLE_PUBLIC_KEY secret not set — updates will fail signature verification"
+          fi
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # ── Quick build (for PR check speed) ──
+      # ── Debug build (fast, for PR checks) ──
       - name: Build (Debug)
         run: |
           xcodebuild build \
@@ -36,7 +51,7 @@ jobs:
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES
 
-      # ── Release build + DMG (always, since build matrix is small) ──
+      # ── Release build + DMG ──
       - name: Build Release
         run: |
           xcodebuild build \
@@ -55,9 +70,7 @@ jobs:
         run: |
           APP_PATH=$(find .build/Build/Products/Release -name "ezclip.app" -type d | head -1)
           echo "App bundle: $APP_PATH"
-          echo "---"
           codesign -dvvv "$APP_PATH" 2>&1 || true
-          echo "---"
           if [ -d "$APP_PATH/Contents/_CodeSignature" ]; then
             echo "✅ Ad-hoc code signature present"
           else
@@ -89,6 +102,114 @@ jobs:
           echo "✅ DMG: build/$DMG_NAME"
           ls -lh "build/$DMG_NAME"
           echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
+
+      # ── Sparkle: sign DMG + update appcast (release only) ──
+      - name: Sign DMG with Sparkle
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "⚠️ SPARKLE_PRIVATE_KEY secret not set — skipping Sparkle signing"
+            echo "   DMG will NOT be signed for auto-update."
+            echo "   Generate keys and add SPARKLE_PRIVATE_KEY and SPARKLE_PUBLIC_KEY secrets."
+            exit 0
+          fi
+
+          # Write the base64-encoded private key to a temp file
+          echo "$SPARKLE_PRIVATE_KEY" | base64 -d > /tmp/sparkle_ed.key
+
+          # sign_update lives inside Sparkle's SPM artifacts, not the app build dir
+          SIGN_UPDATE=$(find .build -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update" -type f 2>/dev/null | head -1)
+          if [ -z "$SIGN_UPDATE" ]; then
+            echo "❌ sign_update not found in DerivedData"
+            find .build -name "sign_update" -type f 2>/dev/null || echo "(no matches)"
+            exit 1
+          fi
+          echo "sign_update: $SIGN_UPDATE"
+
+          DMG_PATH="build/$DMG_NAME"
+          SIGN_OUTPUT=$("$SIGN_UPDATE" "$DMG_PATH" --ed-key-file /tmp/sparkle_ed.key 2>&1)
+          rm -f /tmp/sparkle_ed.key
+
+          echo "Sparkle signature: $SIGN_OUTPUT"
+
+          ED_SIG=$(echo "$SIGN_OUTPUT" | grep -o 'sparkle:edSignature="[^"]*"' | grep -o '"[^"]*"' | tr -d '"')
+          LENGTH=$(echo "$SIGN_OUTPUT" | grep -o 'length="[0-9]*"' | grep -o '[0-9]*')
+
+          if [ -z "$ED_SIG" ] || [ -z "$LENGTH" ]; then
+            echo "❌ Failed to parse signature from sign_update output"
+            echo "Raw: $SIGN_OUTPUT"
+            exit 1
+          fi
+
+          echo "ED_SIG=$ED_SIG" >> $GITHUB_ENV
+          echo "DMG_LENGTH=$LENGTH" >> $GITHUB_ENV
+          echo "✅ DMG signed with Sparkle EdDSA"
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+
+      - name: Update appcast.xml
+        if: ${{ github.event_name == 'release' && env.ED_SIG != '' }}
+        env:
+          DMG_NAME: ${{ env.DMG_NAME }}
+          ED_SIG: ${{ env.ED_SIG }}
+          DMG_LENGTH: ${{ env.DMG_LENGTH }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          python3 << 'PYEOF'
+          import os, sys
+          from xml.etree import ElementTree as ET
+          from datetime import datetime, timezone
+
+          version = os.environ['RELEASE_TAG'].lstrip('v')
+          build = os.popen('/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist').read().strip()
+          dmg_name = os.environ['DMG_NAME']
+          dmg_url = f'https://github.com/KohliNaman/ezclip/releases/download/{os.environ["RELEASE_TAG"]}/{dmg_name}'
+          ed_sig = os.environ['ED_SIG']
+          length = os.environ['DMG_LENGTH']
+          pub_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')
+          notes = os.environ.get('RELEASE_BODY', '').replace(']]>', ']]]]><![CDATA[>')
+
+          ET.register_namespace('sparkle', 'http://www.andymatuschak.org/xml-namespaces/sparkle')
+          ET.register_namespace('dc', 'http://purl.org/dc/elements/1.1/')
+
+          tree = ET.parse('appcast.xml')
+          channel = tree.find('.//channel')
+
+          item = ET.SubElement(channel, 'item')
+          ET.SubElement(item, 'title').text = f'Version {version} (Build {build})'
+          ET.SubElement(item, 'pubDate').text = pub_date
+          ET.SubElement(item, '{http://www.andymatuschak.org/xml-namespaces/sparkle}version').text = build
+          ET.SubElement(item, '{http://www.andymatuschak.org/xml-namespaces/sparkle}shortVersionString').text = version
+          ET.SubElement(item, '{http://www.andymatuschak.org/xml-namespaces/sparkle}minimumSystemVersion').text = '14.0'
+
+          desc = ET.SubElement(item, 'description')
+          desc.text = f'<![CDATA[{notes}]]>'
+
+          enc = ET.SubElement(item, 'enclosure')
+          enc.set('url', dmg_url)
+          enc.set('type', 'application/octet-stream')
+          enc.set('{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature', ed_sig)
+          enc.set('length', length)
+
+          tree.write('appcast.xml', encoding='utf-8', xml_declaration=True)
+          print('✅ appcast.xml updated')
+          PYEOF
+
+      - name: Commit and push appcast
+        if: ${{ github.event_name == 'release' && env.ED_SIG != '' }}
+        run: |
+          git config user.name "ezclip-bot"
+          git config user.email "bot@ezclip.app"
+
+          # Use gh auth for git push
+          git config credential.helper '!gh auth git-credential'
+
+          git add appcast.xml
+          git commit -m "appcast: add ${{ github.event.release.tag_name }}" || echo "No changes to commit"
+          git push origin HEAD:main || echo "Push failed (maybe branch protection?)"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4

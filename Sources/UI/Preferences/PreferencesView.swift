@@ -46,7 +46,7 @@ struct SettingsView: View {
                         }
                     }
 
-                Text("Double-press the Command key to capture the frontmost window.")
+                Text("Double-press the left Command key to capture the frontmost window.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.leading, 20)
@@ -61,6 +61,10 @@ struct SettingsView: View {
                             removeLoginItem()
                         }
                     }
+            }
+
+            Section("Updates") {
+                UpdaterSettingsView()
             }
 
             Section("Storage") {
@@ -145,12 +149,14 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text("Version 1.0.0")
+            Text("Version \(appVersion) (Build \(appBuild))")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
             Divider()
                 .padding(.vertical, 8)
+
+            UpdaterSettingsView()
 
             HStack(spacing: 4) {
                 Text("Double-tap")
@@ -163,6 +169,14 @@ struct SettingsView: View {
         }
         .padding(30)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+
+    private var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
     }
 
     // MARK: - Permission helpers
@@ -226,5 +240,33 @@ struct PermissionRow: View {
         .background(.quaternary.opacity(0.3))
         .cornerRadius(8)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Updater Settings
+
+struct UpdaterSettingsView: View {
+    @ObservedObject private var updaterManager = UpdaterManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { updaterManager.automaticallyChecksForUpdates },
+                set: { updaterManager.automaticallyChecksForUpdates = $0 }
+            )) {
+                Text("Automatically check for updates")
+            }
+
+            Button("Check for Updates...") {
+                updaterManager.checkForUpdates()
+            }
+            .disabled(!updaterManager.canCheckForUpdates)
+
+            #if DEBUG
+            Text("Updates are disabled in debug builds.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            #endif
+        }
     }
 }

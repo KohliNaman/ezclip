@@ -10,8 +10,16 @@ struct CaptureDetailView: View {
     @State private var isEditingNotes = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Toolbar
+        ZStack {
+            // Tap-to-dismiss: clicking empty space around content dismisses.
+            // Buttons and controls sit on top and consume taps first,
+            // so only clicks on margins/whitespace trigger dismissal.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { dismiss() }
+
+            VStack(spacing: 0) {
+                // Toolbar
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(capture.contextDescription)
@@ -161,6 +169,7 @@ struct CaptureDetailView: View {
             fullImage = ImageStorageManager.shared.fullImage(for: capture)
             notes = capture.notes ?? ""
         }
+        } // ZStack
     }
 
     // MARK: - Context Section

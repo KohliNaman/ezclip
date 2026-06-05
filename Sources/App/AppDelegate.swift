@@ -1,6 +1,5 @@
 @preconcurrency import AppKit
 import SwiftUI
-import ScreenCaptureKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -24,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuBar()
 
-        // ── Accessibility (required for double-press ⌘) ──
+        // ── Accessibility (required for double-press LEFT ⌘) ──
         let tapOk = HotkeyManager.shared.register {
             Task { await CaptureOrchestrator.shared.capture() }
         }
@@ -34,9 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showAccessibilityAlert()
             }
         }
-
-        // ── Screen Recording (pre-flight; prompt on first capture attempt) ──
-        preflightScreenRecording()
 
         NSApp.setActivationPolicy(.regular)
 
@@ -74,19 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(
                 URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
             )
-        }
-    }
-
-    private func preflightScreenRecording() {
-        Task {
-            do {
-                _ = try await SCShareableContent.current
-                print("✅ Screen Recording permission: granted")
-            } catch {
-                print("⚠️ Screen Recording permission: not yet granted")
-                // The actual prompt will fire when the user first tries to capture.
-                // The CaptureOrchestrator handles the error with a user-friendly alert.
-            }
         }
     }
 

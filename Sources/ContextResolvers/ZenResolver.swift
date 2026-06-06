@@ -1,5 +1,6 @@
 import Foundation
 import Compression
+@preconcurrency import AppKit
 
 /// Resolves context from Zen Browser. Two-stage approach:
 ///
@@ -109,18 +110,25 @@ struct ZenResolver: AppContextResolver {
     /// Tries multiple decompression strategies because Apple's Compression
     /// framework has known quirks with lz4 on Apple Silicon.
     private func decompressMozLz4(at url: URL) -> [String: Any]? {
-        guard let data = try? Data(contentsOf: url), data.count > 12 else {
-            print("⚠️ ZenResolver: failed to read file or too small (\(data.count))")
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: url)
+        } catch {
+            print("⚠️ ZenResolver: failed to read file: \(error)")
+            return nil
+        }
+        guard fileData.count > 12 else {
+            print("⚠️ ZenResolver: file too small (\(fileData.count) bytes)")
             return nil
         }
 
         let expectedMagic = "mozLz40\0".data(using: .utf8)!
-        guard data.prefix(8) == expectedMagic else {
-            print("⚠️ ZenResolver: bad magic: \(data.prefix(8).map { String(format: "%02x", $0) }.joined())")
+        guard fileData.prefix(8) == expectedMagic else {
+            print("⚠️ ZenResolver: bad magic: \(fileData.prefix(8).map { String(format: "%02x", $0) }.joined())")
             return nil
         }
 
-        let uncompressedSize = Int(data[8..<12].withUnsafeBytes {
+        let uncompressedSize = Int(fileData[8..<12].withUnsafeBytes {
             $0.load(as: UInt32.self).littleEndian
         })
         guard uncompressedSize > 0, uncompressedSize < 50_000_000 else {
@@ -128,7 +136,7 @@ struct ZenResolver: AppContextResolver {
             return nil
         }
 
-        let compressed = data.dropFirst(12)
+        let compressed = fileData.dropFirst(12)
         print("🔍 ZenResolver: decompressing \(compressed.count) → \(uncompressedSize) bytes")
 
         // Strategy 1: COMPRESSION_LZ4_RAW with exact buffer

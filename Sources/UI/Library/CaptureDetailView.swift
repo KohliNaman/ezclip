@@ -97,6 +97,14 @@ struct SimpleDetailView: View {
                         [URL(fileURLWithPath: viewModel.capture.screenshotPath)])
                 }) { Label("Finder", systemImage: "folder") }
                 .buttonStyle(.bordered).controlSize(.small)
+                Button(action: {
+                    if let img = fullImage {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.writeObjects([img])
+                    }
+                }) { Label("Copy Image", systemImage: "doc.on.doc") }
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(fullImage == nil)
                 Button { onDismiss() } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3).foregroundStyle(.secondary)

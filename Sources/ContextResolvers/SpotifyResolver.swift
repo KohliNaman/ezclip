@@ -1,109 +1,50 @@
 import Foundation
 
-/// Resolves context from Spotify — captures what's ON SCREEN, not what's playing.
+/// Resolves context from Spotify using window title only.
 ///
-/// Primary: AppleScript (works on older Spotify versions)
-/// Fallback: window title parsing (works on all versions, captures displayed song)
+/// AppleScript doesn't work with Spotify Premium (Apple dropped scripting
+/// support in modern Spotify). Even if it did, it would return now-playing
+/// info — not what the user is actually LOOKING at (browsing a playlist,
+/// searching, etc.).
 ///
-/// Why window title matters: if the user is browsing a different song/playlist
-/// than what's currently playing, we want to capture what they're LOOKING at,
-/// not what's in their ears.
+/// Window title reflects what's on screen:
+///   "Song Name – Artist Name"     → playing/selected track
+///   "Playlist Name"               → browsing a playlist
+///   "Search"                      → searching
+///   "Spotify Free" / "Spotify Premium" → home screen
 struct SpotifyResolver: AppContextResolver {
     let supportedBundleIds = ["com.spotify.client"]
 
     func resolve(windowTitle: String, bundleId: String) async throws -> ResolvedContext {
-        let engine = ContextResolverEngine.shared
-
-        // ── Try AppleScript first (now-playing info) ──
-        let scriptResult = engine.runAppleScript("""
-            tell application "Spotify"
-                if player state is playing then
-                    set trackName to name of current track
-                    set trackArtist to artist of current track
-                    set trackAlbum to album of current track
-                    try
-                        set artURL to artwork url of current track
-                    on error
-                        set artURL to ""
-                    end try
-                    return trackName & "||" & trackArtist & "||" & trackAlbum & "||" & artURL
-                else
-                    return ""
-                end if
-            end tell
-            """)
-
-        if let info = scriptResult, !info.isEmpty {
-            let parts = info.components(separatedBy: "||")
-            let song = parts[safe: 0].flatMap { $0.isEmpty ? nil : $0 }
-            let artist = parts[safe: 1].flatMap { $0.isEmpty ? nil : $0 }
-            let album = parts[safe: 2].flatMap { $0.isEmpty ? nil : $0 }
-            let artURL = parts[safe: 3].flatMap { $0.isEmpty ? nil : $0 }
-
-            let artData: Data?
-            if let artURL = artURL, let url = URL(string: artURL) {
-                artData = try? Data(contentsOf: url)
-            } else {
-                artData = nil
-            }
-
-            return ResolvedContext(
-                contextType: .music,
-                songName: song,
-                artistName: artist,
-                albumName: album,
-                albumArtData: artData
-            )
-        }
-
-        // ── Fallback: parse window title ──
-        // Spotify window titles: "Song Name — Artist Name"
-        // or when browsing: "Playlist Name — Spotify", "Search results", etc.
-        return parseWindowTitle(windowTitle)
+        parseWindowTitle(windowTitle)
     }
 
-    /// Parses Spotify's window title for song/artist info.
-    /// Spotify free tier and newer versions don't expose AppleScript,
-    /// but the window title always reflects what's on screen.
+    /// Parses Spotify's window title for song/artist/context info.
+    /// Spotify appends " - Spotify" or " — Spotify" to the title on
+    /// some versions.
     private func parseWindowTitle(_ title: String) -> ResolvedContext {
-        // Clean up: Spotify appends " - Spotify" or " — Spotify" to the title
+        // Strip Spotify branding suffix
         var cleaned = title
             .replacingOccurrences(of: " — Spotify", with: "")
             .replacingOccurrences(of: " - Spotify", with: "")
+            .replacingOccurrences(of: " | Spotify", with: "")
             .trimmingCharacters(in: .whitespaces)
 
-        // Patterns to try:
-        // "Song Name — Artist Name" (most common)
-        // "Artist Name – Song Name" (sometimes reversed)
-        // For browsing: "Playlist Name", "Search", etc.
-
-        let separators = [" — ", " – ", " - ", "–", "—"]
-
-        for sep in separators {
-            let parts = cleaned.components(separatedBy: sep)
-            if parts.count == 2 {
-                let first = parts[0].trimmingCharacters(in: .whitespaces)
-                let second = parts[1].trimmingCharacters(in: .whitespaces)
-
-                // Heuristic: if second part looks like an artist (not "Spotify", "Premium", etc.)
-                let nonArtist = ["spotify", "premium", "free", "mini player", "now playing"]
-                if !nonArtist.contains(where: { second.lowercased().contains($0) })
-                    && !first.isEmpty && !second.isEmpty {
-
-                    // Most Spotify window titles show "Song — Artist"
-                    return ResolvedContext(
-                        contextType: .music,
-                        songName: first,
-                        artistName: second,
-                        albumName: nil,
-                        albumArtData: nil
-                    )
-                }
-            }
+        // Empty / generic
+        if cleaned.isEmpty {
+            return ResolvedContext(contextType: .music)
         }
 
-        // If no clear song/artist separation, treat the whole thing as context
-        if !cleaned.isEmpty && cleaned.lowercased() != "spotify" {
+        // Detect non-song views
+        let lower = cleaned.lowercased()
+        let nonSongViews = [
+            "spotify free", "spotify premium", "spotify",
+            "home", "search", "browse", "library",
+            "now playing", "mini player", "miniplayer",
+            "made for you", "recommended", "recently played",
+            "your library", "liked songs"
+        ]
+        if nonSongViews.contains(lower) || cleaned.count < 3 {
             return ResolvedContext(
                 contextType: .music,
                 songName: cleaned,
@@ -113,15 +54,45 @@ struct SpotifyResolver: AppContextResolver {
             )
         }
 
-        // Nothing useful
-        return ResolvedContext(contextType: .music)
-    }
-}
+        // Try "Song – Artist" or "Song — Artist" patterns
+        // Spotify uses em-dash or en-dash between song and artist
+        let separators = [" — ", " – ", " - "]
 
-// MARK: - Array safe subscript
+        for sep in separators {
+            let parts = cleaned.components(separatedBy: sep)
+            if parts.count >= 2 {
+                let first = parts[0].trimmingCharacters(in: .whitespaces)
+                let second = parts[1].trimmingCharacters(in: .whitespaces)
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
+                // Both parts must be meaningful
+                guard !first.isEmpty, !second.isEmpty else { continue }
+                guard first.count > 1, second.count > 1 else { continue }
+
+                // Second part shouldn't look like a Spotify UI label
+                let uiLabels = ["spotify", "premium", "free", "mini player",
+                               "miniplayer", "home", "browse", "search", "library"]
+                if uiLabels.contains(where: { second.lowercased().contains($0) }) {
+                    continue
+                }
+
+                // "Song – Artist"
+                return ResolvedContext(
+                    contextType: .music,
+                    songName: first,
+                    artistName: second,
+                    albumName: nil,
+                    albumArtData: nil
+                )
+            }
+        }
+
+        // No separator found — it's a playlist name or other context
+        return ResolvedContext(
+            contextType: .music,
+            songName: cleaned,
+            artistName: nil,
+            albumName: nil,
+            albumArtData: nil
+        )
     }
 }

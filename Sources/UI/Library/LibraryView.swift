@@ -4,9 +4,6 @@ struct LibraryView: View {
     @EnvironmentObject var viewModel: LibraryViewModel
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showingSettings = false
-    @State private var showDetail = false
-    @State private var detailCaptures: [Capture] = []
-    @State private var detailIndex: Int = 0
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -57,15 +54,6 @@ struct LibraryView: View {
                         }
                         .padding(16)
                     }
-                }
-            }
-            .popover(isPresented: $showDetail) {
-                if detailIndex < detailCaptures.count {
-                    SimpleDetailView(
-                        captures: detailCaptures,
-                        startIndex: detailIndex,
-                        onDismiss: { showDetail = false }
-                    )
                 }
             }
             .toolbar {
@@ -166,9 +154,11 @@ struct LibraryView: View {
     // MARK: - Helpers
 
     private func openDetail(for capture: Capture) {
-        detailCaptures = viewModel.filteredCaptures
-        detailIndex = detailCaptures.firstIndex(where: { $0.id == capture.id }) ?? 0
-        showDetail = true
+        let captures = viewModel.filteredCaptures
+        let index = captures.firstIndex(where: { $0.id == capture.id }) ?? 0
+        DetailWindow.shared.show(captures: captures, at: index) {
+            // Detail window dismissed — nothing to clean up
+        }
     }
 
     private func openInBrowser(_ capture: Capture) {

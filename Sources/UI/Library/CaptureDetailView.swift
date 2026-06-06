@@ -1,37 +1,19 @@
 import SwiftUI
 import AppKit
 
-/// Dead-simple detail view. Takes a snapshot of captures at open time,
-/// tracks position with a plain Int, navigates by +1/-1. No viewModel
-/// index recalculation, no binding ping-pong, no stale state.
+/// Detail view for a single capture. Uses a DetailViewModel for stable
+/// state (no @State index that gets recreated by SwiftUI).
 ///
-/// NSEvent monitor intercepts Esc/arrows before any focused view.
-/// Click-outside works because this is inside a .popover.
+/// Hosted in an NSPanel managed by DetailWindow — not a SwiftUI popover.
+/// NSPanel gives us reliable keyboard events and click-outside dismiss.
 struct SimpleDetailView: View {
-    let captures: [Capture]
-    @State private var currentIndex: Int
+    @ObservedObject var viewModel: DetailViewModel
     let onDismiss: () -> Void
 
     @State private var fullImage: NSImage?
     @State private var notes: String = ""
     @State private var isEditingNotes = false
     @State private var eventMonitor: Any?
-
-    init(captures: [Capture], startIndex: Int, onDismiss: @escaping () -> Void) {
-        self.captures = captures
-        self._currentIndex = State(initialValue: startIndex)
-        self.onDismiss = onDismiss
-    }
-
-    private var capture: Capture {
-        guard currentIndex >= 0, currentIndex < captures.count else {
-            return captures[0]
-        }
-        return captures[currentIndex]
-    }
-
-    private var canGoPrevious: Bool { currentIndex > 0 }
-    private var canGoNext: Bool { currentIndex < captures.count - 1 }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,7 +23,7 @@ struct SimpleDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     imageView
 
-                    if captures.count > 1 {
+                    if viewModel.captures.count > 1 {
                         galleryBar
                     }
 
@@ -52,10 +34,10 @@ struct SimpleDetailView: View {
                 .padding(20)
             }
         }
-        .frame(minWidth: 700, idealWidth: 800, minHeight: 600)
+        .frame(minWidth: 700, idealWidth: 760, minHeight: 560)
         .onAppear { installKeyMonitor(); loadCapture() }
         .onDisappear { removeKeyMonitor() }
-        .onChange(of: currentIndex) { _, _ in loadCapture() }
+        .onChange(of: viewModel.currentIndex) { _, _ in loadCapture() }
     }
 
     // MARK: - Key Monitor
@@ -69,8 +51,8 @@ struct SimpleDetailView: View {
 
             switch Int(event.keyCode) {
             case 53: onDismiss(); return nil                              // Esc
-            case 123: goPrevious(); return nil                            // ←
-            case 124: goNext(); return nil                                // →
+            case 123: viewModel.goPrevious(); return nil                  // ←
+            case 124: viewModel.goNext(); return nil                      // →
             default: return event
             }
         }
@@ -80,21 +62,11 @@ struct SimpleDetailView: View {
         if let m = eventMonitor { NSEvent.removeMonitor(m); eventMonitor = nil }
     }
 
-    // MARK: - Navigation
-
-    private func goPrevious() {
-        guard canGoPrevious else { return }
-        currentIndex -= 1
-    }
-
-    private func goNext() {
-        guard canGoNext else { return }
-        currentIndex += 1
-    }
+    // MARK: - Load
 
     private func loadCapture() {
-        fullImage = ImageStorageManager.shared.fullImage(for: capture)
-        notes = capture.notes ?? ""
+        fullImage = ImageStorageManager.shared.fullImage(for: viewModel.capture)
+        notes = viewModel.capture.notes ?? ""
         isEditingNotes = false
     }
 
@@ -103,14 +75,14 @@ struct SimpleDetailView: View {
     private var toolbar: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(capture.contextDescription)
+                Text(viewModel.capture.contextDescription)
                     .font(.headline).lineLimit(1)
-                Text(capture.timestamp.formatted(date: .abbreviated, time: .shortened))
+                Text(viewModel.capture.timestamp.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption).foregroundColor(.secondary)
             }
             Spacer()
             HStack(spacing: 8) {
-                if let url = capture.url, let nsurl = URL(string: url) {
+                if let url = viewModel.capture.url, let nsurl = URL(string: url) {
                     Button(action: { NSWorkspace.shared.open(nsurl) }) {
                         Label("Open", systemImage: "safari")
                     }.buttonStyle(.bordered).controlSize(.small)
@@ -122,7 +94,7 @@ struct SimpleDetailView: View {
                 }
                 Button(action: {
                     NSWorkspace.shared.activateFileViewerSelecting(
-                        [URL(fileURLWithPath: capture.screenshotPath)])
+                        [URL(fileURLWithPath: viewModel.capture.screenshotPath)])
                 }) { Label("Finder", systemImage: "folder") }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button { onDismiss() } label: {
@@ -157,12 +129,14 @@ struct SimpleDetailView: View {
 
     private var galleryBar: some View {
         HStack(spacing: 12) {
-            Button(action: goPrevious) { Image(systemName: "chevron.left") }
-                .buttonStyle(.plain).disabled(!canGoPrevious)
-            Text("\(currentIndex + 1) of \(captures.count)")
+            Button(action: viewModel.goPrevious) { Image(systemName: "chevron.left") }
+                .buttonStyle(.plain).disabled(!viewModel.canGoPrevious)
+                .keyboardShortcut(.leftArrow, modifiers: [])
+            Text("\(viewModel.currentIndex + 1) of \(viewModel.captures.count)")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            Button(action: goNext) { Image(systemName: "chevron.right") }
-                .buttonStyle(.plain).disabled(!canGoNext)
+            Button(action: viewModel.goNext) { Image(systemName: "chevron.right") }
+                .buttonStyle(.plain).disabled(!viewModel.canGoNext)
+                .keyboardShortcut(.rightArrow, modifiers: [])
         }
         .frame(maxWidth: .infinity).padding(.vertical, 4)
     }
@@ -172,14 +146,14 @@ struct SimpleDetailView: View {
     @ViewBuilder
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(capture.contextType.displayName, systemImage: capture.contextType.iconName)
+            Label(viewModel.capture.contextType.displayName, systemImage: viewModel.capture.contextType.iconName)
                 .font(.headline).foregroundStyle(.secondary)
-            switch capture.contextType {
+            switch viewModel.capture.contextType {
             case .website: websiteView
             case .music:   musicView
             case .design:  designView
             case .file:    fileView
-            case .generic: Text(capture.windowTitle).font(.body)
+            case .generic: Text(viewModel.capture.windowTitle).font(.body)
             }
         }
         .padding(14).background(.quaternary.opacity(0.3)).cornerRadius(10)
@@ -187,10 +161,10 @@ struct SimpleDetailView: View {
 
     private var websiteView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let t = capture.pageTitle { Text(t).font(.body).fontWeight(.medium) }
-            if let u = capture.url {
+            if let t = viewModel.capture.pageTitle { Text(t).font(.body).fontWeight(.medium) }
+            if let u = viewModel.capture.url {
                 HStack(spacing: 6) {
-                    if let fp = capture.faviconPath, let fi = NSImage(contentsOfFile: fp) {
+                    if let fp = viewModel.capture.faviconPath, let fi = NSImage(contentsOfFile: fp) {
                         Image(nsImage: fi).resizable().frame(width: 16, height: 16).cornerRadius(3)
                     }
                     Text(u).font(.callout).foregroundColor(.blue).lineLimit(2)
@@ -202,22 +176,22 @@ struct SimpleDetailView: View {
 
     private var musicView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let s = capture.songName { Label(s, systemImage: "music.note").font(.body) }
-            if let a = capture.artistName { Label(a, systemImage: "person.fill").font(.callout) }
-            if let al = capture.albumName { Label(al, systemImage: "square.stack.fill").font(.callout) }
+            if let s = viewModel.capture.songName { Label(s, systemImage: "music.note").font(.body) }
+            if let a = viewModel.capture.artistName { Label(a, systemImage: "person.fill").font(.callout) }
+            if let al = viewModel.capture.albumName { Label(al, systemImage: "square.stack.fill").font(.callout) }
         }
     }
 
     private var designView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let f = capture.designFileName { Label(f, systemImage: "doc.richtext").font(.body) }
-            if let p = capture.designPageName { Label(p, systemImage: "rectangle.split.1x2").font(.callout) }
+            if let f = viewModel.capture.designFileName { Label(f, systemImage: "doc.richtext").font(.body) }
+            if let p = viewModel.capture.designPageName { Label(p, systemImage: "rectangle.split.1x2").font(.callout) }
         }
     }
 
     private var fileView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let p = capture.filePath {
+            if let p = viewModel.capture.filePath {
                 Label(URL(fileURLWithPath: p).lastPathComponent, systemImage: "folder.fill").font(.body)
                 Text(p).font(.caption).foregroundColor(.secondary).lineLimit(2)
             }
@@ -249,10 +223,10 @@ struct SimpleDetailView: View {
     private var metadataSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Metadata").font(.caption).fontWeight(.semibold).foregroundColor(.secondary)
-            row("App", capture.appName)
-            row("Bundle ID", capture.appBundleId)
-            row("Window", capture.windowTitle)
-            if capture.isScrolling, let i = capture.scrollIndex { row("Slice", "#\(i + 1)") }
+            row("App", viewModel.capture.appName)
+            row("Bundle ID", viewModel.capture.appBundleId)
+            row("Window", viewModel.capture.windowTitle)
+            if viewModel.capture.isScrolling, let i = viewModel.capture.scrollIndex { row("Slice", "#\(i + 1)") }
         }
     }
 

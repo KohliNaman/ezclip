@@ -33,6 +33,9 @@ final class CaptureOrchestrator {
             let captureId = UUID()
             let (fullPath, thumbPath) = try storage.saveScreenshot(image, captureId: captureId)
 
+            // Copy to clipboard with 10-minute auto-expiry
+            ClipboardManager.shared.copyToClipboard(image)
+
             let context = await contextEngine.resolve(
                 bundleId: windowInfo.bundleId,
                 windowTitle: windowInfo.windowTitle

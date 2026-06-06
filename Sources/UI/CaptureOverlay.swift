@@ -1,11 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Notch-area capture feedback, mimicking macOS camera/mic indicators.
-///
-/// Appears as a small pill to the RIGHT of the notch that springs open
-/// showing a shutter icon + "Captured", holds briefly, then collapses.
-/// Never steals focus, ignores clicks.
+/// Notch-area capture feedback — small circle with shutter icon.
+/// Appears to the right of the notch, springs in, holds, fades out.
+/// Never steals focus, ignores clicks. Icon only — no text.
 @MainActor
 final class CaptureOverlay {
     static let shared = CaptureOverlay()
@@ -20,10 +18,10 @@ final class CaptureOverlay {
 
         let content = NotchOverlayView()
         let hosting = NSHostingView(rootView: content)
-        hosting.frame = NSRect(x: 0, y: 0, width: 220, height: 40)
+        hosting.frame = NSRect(x: 0, y: 0, width: 44, height: 44)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 40),
+            contentRect: NSRect(x: 0, y: 0, width: 44, height: 44),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -42,30 +40,19 @@ final class CaptureOverlay {
         // Position: right side of notch, at menu bar level
         if let screen = NSScreen.main {
             let screenFrame = screen.frame
-            let screenWidth = screenFrame.width
             let screenHeight = screenFrame.height
 
-            // On notched Macs, the menu bar is taller (~37pt vs 24pt).
-            // The notch occupies roughly center 160pt of the menu bar.
-            // Menu bar items live on the left (Apple menu) and right
-            // (status icons). We position on the right side.
-            //
-            // Detect notch: if visibleFrame.maxY < screenFrame.maxY,
-            // there's a menu bar occupying the top. The notch is at
-            // horizontal center.
             let menuBarHeight = screenFrame.height - screen.visibleFrame.maxY
-            let hasNotch = menuBarHeight > 25 // taller menu bar = notch present
+            let hasNotch = menuBarHeight > 25
 
-            // X: right of notch center area
             let notchCenterX = screenFrame.midX
             let notchHalfWidth: CGFloat = hasNotch ? 85 : 0
-            let pillX = notchCenterX + notchHalfWidth + 12
+            let dotX = notchCenterX + notchHalfWidth + 12
 
-            // Y: centered vertically in the menu bar
             let menuBarCenterY = screenHeight - (menuBarHeight / 2)
-            let pillY = menuBarCenterY - 20 // panel height is 40, so half = 20
+            let dotY = menuBarCenterY - 22 // half of 44
 
-            panel.setFrameOrigin(NSPoint(x: pillX, y: pillY))
+            panel.setFrameOrigin(NSPoint(x: dotX, y: dotY))
         }
 
         panel.orderFront(nil)
@@ -80,92 +67,77 @@ final class CaptureOverlay {
 
 // MARK: - SwiftUI Overlay
 
-/// Animation timeline:
-///   0.00s: invisible dot (12pt)
-///   0.05s: spring-expand dot → pill (with icon + text)
-///   0.80s: hold
-///   1.10s: collapse pill → dot
-///   1.40s: fade out
+/// Animation: spring-in scale (0 → 1.15 → 1.0), hold, fade out.
+/// Icon only — no text, no clipping.
 private struct NotchOverlayView: View {
     @State private var phase: Phase = .hidden
 
-    private enum Phase: CaseIterable {
-        case hidden, expand, hold, collapse, done
+    private enum Phase {
+        case hidden, spring, hold, fadeOut, done
     }
 
-    private var pillWidth: CGFloat {
+    private var scale: CGFloat {
         switch phase {
-        case .hidden:   return 32
-        case .expand:   return 180
-        case .hold:     return 180
-        case .collapse: return 32
-        case .done:     return 32
+        case .hidden:   return 0.0
+        case .spring:   return 1.0
+        case .hold:     return 1.0
+        case .fadeOut:  return 0.8
+        case .done:     return 0.0
         }
     }
 
-    private var pillOpacity: Double {
+    private var opacity: Double {
         switch phase {
         case .hidden:   return 0
-        case .expand, .hold: return 1
-        case .collapse: return 0.5
+        case .spring:   return 1
+        case .hold:     return 1
+        case .fadeOut:  return 0.3
         case .done:     return 0
         }
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "camera.shutter.button.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
-
-            if phase == .expand || phase == .hold {
-                Text("Captured")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .transition(.opacity.combined(with: .move(edge: .leading)).animation(.easeOut(duration: 0.15)))
-            }
-        }
-        .frame(width: pillWidth, height: 30)
-        .opacity(pillOpacity)
-        .background(
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .environment(\.colorScheme, .dark)
-                .overlay(
-                    Capsule()
-                        .stroke(.white.opacity(0.15), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
-        )
-        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pillWidth)
-        .animation(.easeInOut(duration: 0.2), value: pillOpacity)
-        .onAppear { runAnimation() }
+        Image(systemName: "camera.shutter.button.fill")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(.white)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .frame(width: 32, height: 32)
+            .background(
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .environment(\.colorScheme, .dark)
+                    .overlay(
+                        Circle()
+                            .stroke(.white.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+            )
+            .animation(.spring(response: 0.45, dampingFraction: 0.65), value: scale)
+            .animation(.easeInOut(duration: 0.2), value: opacity)
+            .onAppear { runAnimation() }
     }
 
     private func runAnimation() {
-        // 0.00: appear as dot
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-            phase = .expand
+        // Spring in
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.65)) {
+            phase = .spring
         }
 
-        // 0.80: hold
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+        // Hold 0.7s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
             phase = .hold
         }
 
-        // 1.10: collapse
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-            withAnimation(.easeIn(duration: 0.25)) {
-                phase = .collapse
+        // Fade out at 1.0s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation(.easeIn(duration: 0.3)) {
+                phase = .fadeOut
             }
-        }
 
-        // 1.45: done
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.45) {
-            phase = .done
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                phase = .done
+            }
         }
     }
 }

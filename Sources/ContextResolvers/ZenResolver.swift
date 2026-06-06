@@ -1,33 +1,19 @@
 import Foundation
-import Compression
 @preconcurrency import AppKit
 
-/// Resolves context from Zen Browser. Two-stage approach:
+/// Resolves context from Zen Browser silently via sessionstore.
 ///
-/// 1. Sessionstore (silent, fast): reads recovery.jsonlz4 from disk,
-///    decompresses mozLz4, extracts active tab URL. Browser never knows.
-/// 2. Keyboard shortcut (fallback): if sessionstore fails, uses
-///    System Events to Cmd+L → Cmd+C → read clipboard. Brief flicker
-///    but guaranteed to work.
-///
-/// The Apple Compression framework's COMPRESSION_LZ4_RAW has known
-/// compatibility issues with mozLz4 on Apple Silicon macOS 14+,
-/// so we try both RAW and framed modes, plus an exact-buffer variant.
+/// Reads recovery.jsonlz4 from disk, decompresses mozLz4 with a
+/// pure-Swift LZ4 block decoder (no Apple Compression framework),
+/// and extracts the active tab URL. The browser never knows.
 struct ZenResolver: AppContextResolver {
     let supportedBundleIds = ["app.zen-browser.zen"]
 
     func resolve(windowTitle: String, bundleId: String) async throws -> ResolvedContext {
         let pageTitle = extractPageTitle(from: windowTitle)
 
-        // Stage 1: try silent sessionstore read
-        var url = readSessionURL()
+        let url = readSessionURL()
         print("🔍 ZenResolver: sessionstore url = \(url ?? "nil")")
-
-        // Stage 2: fall back to keyboard shortcut (Cmd+L, Cmd+C)
-        if url == nil {
-            url = await extractURLViaClipboard()
-            print("🔍 ZenResolver: clipboard url = \(url ?? "nil")")
-        }
 
         var faviconData: Data?
         if let url = url {
@@ -104,11 +90,17 @@ struct ZenResolver: AppContextResolver {
         return nil
     }
 
-    // MARK: - mozLz4 Decompression
+    // MARK: - mozLz4 Decompression (Pure Swift LZ4)
 
     /// mozLz4: 8-byte magic "mozLz40\0" + 4-byte LE uint32 size + raw lz4 data.
-    /// Tries multiple decompression strategies because Apple's Compression
-    /// framework has known quirks with lz4 on Apple Silicon.
+    /// Uses a pure-Swift LZ4 block decompressor — no Apple Compression framework,
+    /// no Python, no external tools. Reliable on Apple Silicon.
+    ///
+    /// The LZ4 raw block format (as produced by LZ4_compress_default):
+    ///   Sequence of { token, [literals], [offset, match_length] }
+    ///   Token: upper 4b = literal_len, lower 4b = match_len (pre-MINMATCH)
+    ///   Extra length bytes follow when value is 255 (additive, chain stops at <255)
+    ///   Match copies from already-decompressed output at (pos - offset)
     private func decompressMozLz4(at url: URL) -> [String: Any]? {
         let fileData: Data
         do {
@@ -137,58 +129,87 @@ struct ZenResolver: AppContextResolver {
         }
 
         let compressed = fileData.dropFirst(12)
-        print("🔍 ZenResolver: decompressing \(compressed.count) → \(uncompressedSize) bytes")
+        print("🔍 ZenResolver: lz4 decompressing \(compressed.count) → \(uncompressedSize) bytes")
 
-        // Strategy 1: COMPRESSION_LZ4_RAW with exact buffer
-        if let result = tryDecompress(compressed, uncompressedSize, COMPRESSION_LZ4_RAW) {
-            return result
-        }
-
-        // Strategy 2: COMPRESSION_LZ4_RAW with slightly larger buffer
-        if let result = tryDecompress(compressed, uncompressedSize, COMPRESSION_LZ4_RAW, extraBytes: 4096) {
-            return result
-        }
-
-        // Strategy 3: COMPRESSION_LZ4 (framed) with exact buffer
-        if let result = tryDecompress(compressed, uncompressedSize, COMPRESSION_LZ4) {
-            return result
-        }
-
-        print("⚠️ ZenResolver: all decompression strategies failed")
-        return nil
-    }
-
-    private func tryDecompress(
-        _ compressed: Data,
-        _ expectedSize: Int,
-        _ algorithm: compression_algorithm,
-        extraBytes: Int = 0
-    ) -> [String: Any]? {
-        let bufSize = expectedSize + extraBytes
-        var decompressed = Data(count: bufSize)
-        let actualSize = decompressed.withUnsafeMutableBytes { dest in
-            compressed.withUnsafeBytes { src in
-                compression_decode_buffer(
-                    dest.baseAddress!, dest.count,
-                    src.baseAddress!, src.count,
-                    nil,
-                    algorithm
-                )
-            }
-        }
-
-        guard actualSize == expectedSize else {
-            print("⚠️ ZenResolver: lz4[\(algorithm)] size mismatch: got \(actualSize), expected \(expectedSize)")
+        guard let decompressed = lz4Decompress(compressed, expectedSize: uncompressedSize) else {
+            print("⚠️ ZenResolver: lz4 decompression failed")
             return nil
         }
 
-        let jsonData = decompressed.prefix(actualSize)
         do {
-            return try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+            let json = try JSONSerialization.jsonObject(with: decompressed) as? [String: Any]
+            print("✅ ZenResolver: lz4 decompressed \(decompressed.count) bytes successfully")
+            return json
         } catch {
             print("⚠️ ZenResolver: JSON parse failed: \(error)")
             return nil
         }
+    }
+
+    /// Pure Swift LZ4 raw block decompressor. Handles the format produced by
+    /// LZ4_compress_default / mozLz4 — no framing, just raw sequences.
+    private func lz4Decompress(_ src: Data, expectedSize: Int) -> Data? {
+        var dst = Data(count: expectedSize)
+        var srcIdx = src.startIndex
+        var dstIdx = 0
+        let srcEnd = src.endIndex
+
+        while srcIdx < srcEnd && dstIdx < expectedSize {
+            // --- Token ---
+            let token = Int(src[srcIdx]); srcIdx += 1
+            var literalLen = token >> 4
+            var matchLen = token & 0x0F
+
+            // --- Literal length (extensible) ---
+            if literalLen == 15 {
+                while srcIdx < srcEnd {
+                    let extra = Int(src[srcIdx]); srcIdx += 1
+                    literalLen += extra
+                    if extra < 255 { break }
+                }
+            }
+
+            // --- Copy literals ---
+            guard srcIdx + literalLen <= srcEnd else { return nil }
+            if literalLen > 0 {
+                dst[dstIdx..<dstIdx + literalLen] = src[srcIdx..<srcIdx + literalLen]
+                srcIdx += literalLen
+                dstIdx += literalLen
+            }
+
+            // --- Match (may be absent at end of stream) ---
+            if dstIdx >= expectedSize { break }
+            guard srcIdx + 2 <= srcEnd else { break }
+
+            // Offset (little-endian 16-bit)
+            let offset = Int(src[srcIdx]) | (Int(src[srcIdx + 1]) << 8)
+            srcIdx += 2
+            guard offset > 0, offset <= dstIdx else { return nil }
+
+            // Match length (extensible, MINMATCH = 4)
+            matchLen += 4
+            if matchLen == 19 { // 15 + 4
+                while srcIdx < srcEnd {
+                    let extra = Int(src[srcIdx]); srcIdx += 1
+                    matchLen += extra
+                    if extra < 255 { break }
+                }
+            }
+
+            // --- Copy match (may overlap — RLE) ---
+            let matchStart = dstIdx - offset
+            guard matchStart + matchLen <= expectedSize else { return nil }
+            for i in 0..<matchLen {
+                dst[dstIdx + i] = dst[matchStart + i]
+            }
+            dstIdx += matchLen
+        }
+
+        guard dstIdx == expectedSize else {
+            print("⚠️ ZenResolver: lz4 output size mismatch: got \(dstIdx), expected \(expectedSize)")
+            return nil
+        }
+        return dst
     }
 
     // MARK: - URL Extraction
@@ -219,43 +240,5 @@ struct ZenResolver: AppContextResolver {
         }
 
         return bestURL
-    }
-
-    // MARK: - Keyboard Shortcut Fallback
-
-    /// Uses System Events to press Cmd+L (select address bar) then Cmd+C
-    /// (copy URL) in Zen. This briefly brings Zen to the foreground,
-    /// but is guaranteed to work when sessionstore fails.
-    private func extractURLViaClipboard() async -> String? {
-        let oldClipboard = NSPasteboard.general.string(forType: .string)
-
-        let script = """
-        tell application "Zen" to activate
-        delay 0.15
-        tell application "System Events"
-            tell process "Zen"
-                keystroke "l" using command down
-                delay 0.1
-                keystroke "c" using command down
-                delay 0.1
-            end tell
-        end tell
-        """
-
-        _ = await ContextResolverEngine.shared.runAppleScriptAsync(script, timeout: 3)
-        try? await Task.sleep(nanoseconds: 150_000_000)
-
-        let url = NSPasteboard.general.string(forType: .string)
-
-        // Restore old clipboard
-        if let old = oldClipboard, old != url {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(old, forType: .string)
-        }
-
-        if let url = url, (url.hasPrefix("http://") || url.hasPrefix("https://")) {
-            return url
-        }
-        return nil
     }
 }

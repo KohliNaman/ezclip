@@ -100,7 +100,7 @@ final class DetailWindow {
 
 // MARK: - Window Delegate
 
-private final class DetailWindowDelegate: NSObject, NSWindowDelegate {
+private final class DetailWindowDelegate: NSObject, NSWindowDelegate, @unchecked Sendable {
     static let shared = DetailWindowDelegate()
 
     func windowWillClose(_ notification: Notification) {

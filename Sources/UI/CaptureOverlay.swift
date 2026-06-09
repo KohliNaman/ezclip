@@ -17,7 +17,9 @@ final class CaptureOverlay {
             queue: .main
         ) { [weak self] notification in
             guard let capture = notification.object as? Capture else { return }
-            self?.viewModel.update(from: capture)
+            Task { @MainActor [weak self] in
+                self?.viewModel.update(from: capture)
+            }
         }
     }
 
@@ -29,7 +31,7 @@ final class CaptureOverlay {
 
         viewModel.configure(context: context, appName: appName, bundleId: bundleId, thumbnail: thumbnail)
 
-        let view = NotchOverlayView(viewModel: viewModel)
+        let view = NotchOverlayView(viewModel: self.viewModel)
         let hosting = NSHostingView(rootView: view)
         hosting.frame = NSRect(x: 0, y: 0, width: 280, height: 160)
 
@@ -45,7 +47,6 @@ final class CaptureOverlay {
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.ignoresMouseEvents = false
-        panel.canBecomeKey = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
 
@@ -164,9 +165,8 @@ final class OverlayViewModel: ObservableObject {
 
     func update(from capture: Capture) {
         contextText = capture.contextDescription
-        if let path = capture.thumbnailPath {
-            thumbnail = NSImage(contentsOfFile: path)
-        }
+        let path = capture.thumbnailPath
+        thumbnail = NSImage(contentsOfFile: path)
         timestamp = DateFormatter.localizedString(from: capture.timestamp, dateStyle: .short, timeStyle: .short)
     }
 }
@@ -235,7 +235,6 @@ struct NotchOverlayView: View {
                 .compositingGroup()
 
             content
-                .contentTransition(.scale(scale: 0.8, anchor: .top).combined(with: .opacity))
                 .padding(.horizontal, viewModel.phase == .expanded ? 12 : 8)
                 .padding(.vertical, viewModel.phase == .expanded ? 12 : 6)
         }

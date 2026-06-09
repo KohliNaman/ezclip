@@ -33,6 +33,12 @@ final class CaptureOrchestrator {
             let captureId = UUID()
             let (fullPath, thumbPath) = try storage.saveScreenshot(image, captureId: captureId)
 
+            // Notify the browser extension and wait for design context
+            LocalCaptureServer.shared.setPending(requestId: captureId)
+            defer { LocalCaptureServer.shared.clearPending() }
+
+            async let extensionContext = LocalCaptureServer.shared.waitForContext(timeout: 3)
+
             // Copy to clipboard with 10-minute auto-expiry
             ClipboardManager.shared.copyToClipboard(image)
 
@@ -41,13 +47,23 @@ final class CaptureOrchestrator {
                 windowTitle: windowInfo.windowTitle
             )
 
+            var mergedContext = context
+            if let extData = await extensionContext {
+                mergedContext.designContext = extData
+            }
+
             var faviconPath: String?
-            if let favData = context.faviconData {
+            if let favData = mergedContext.faviconData {
                 faviconPath = try? storage.saveData(favData, name: "\(captureId)_favicon")
             }
             var albumArtPath: String?
-            if let artData = context.albumArtData {
+            if let artData = mergedContext.albumArtData {
                 albumArtPath = try? storage.saveData(artData, name: "\(captureId)_albumart")
+            }
+
+            let designContextJSON: String? = mergedContext.designContext.flatMap {
+                guard let data = try? JSONSerialization.data(withJSONObject: $0) else { return nil }
+                return String(data: data, encoding: .utf8)
             }
 
             var capture = Capture(
@@ -58,17 +74,18 @@ final class CaptureOrchestrator {
                 windowTitle: windowInfo.windowTitle,
                 screenshotPath: fullPath,
                 thumbnailPath: thumbPath,
-                contextType: context.contextType,
-                url: context.url,
-                pageTitle: context.pageTitle,
+                contextType: mergedContext.contextType,
+                url: mergedContext.url,
+                pageTitle: mergedContext.pageTitle,
                 faviconPath: faviconPath,
-                songName: context.songName,
-                artistName: context.artistName,
-                albumName: context.albumName,
+                songName: mergedContext.songName,
+                artistName: mergedContext.artistName,
+                albumName: mergedContext.albumName,
                 albumArtPath: albumArtPath,
-                designFileName: context.designFileName,
-                designPageName: context.designPageName,
-                filePath: context.filePath,
+                designFileName: mergedContext.designFileName,
+                designPageName: mergedContext.designPageName,
+                designContextJSON: designContextJSON,
+                filePath: mergedContext.filePath,
                 notes: nil,
                 collectionId: nil,
                 isScrolling: false,
@@ -87,7 +104,7 @@ final class CaptureOrchestrator {
             NotificationCenter.default.post(name: .newCaptureCreated, object: capture)
             showNotification(for: capture)
             let thumb = NSImage(contentsOfFile: thumbPath)
-            CaptureOverlay.shared.show(context: context, thumbnail: thumb, appName: windowInfo.appName, bundleId: windowInfo.bundleId)
+            CaptureOverlay.shared.show(context: mergedContext, thumbnail: thumb, appName: windowInfo.appName, bundleId: windowInfo.bundleId)
 
             print("📸 Captured: \(capture.contextDescription)")
 

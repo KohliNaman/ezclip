@@ -84,6 +84,12 @@ final class DatabaseManager {
             try db.create(index: "idx_tag_name", on: "tag", columns: ["name"])
         }
 
+        migrator.registerMigration("v2") { db in
+            try db.alter(table: "capture", body: { t in
+                t.add(column: "designContextJSON", .text)
+            })
+        }
+
         return migrator
     }
 

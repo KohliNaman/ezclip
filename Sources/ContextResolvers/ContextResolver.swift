@@ -21,6 +21,7 @@ struct ResolvedContext {
     var albumArtData: Data?
     var designFileName: String?
     var designPageName: String?
+    var designContext: [String: Any]?
     var filePath: String?
     var browserName: String? = nil
 }

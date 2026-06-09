@@ -43,6 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("✅ Hotkey active")
         }
 
+        // ── Start local HTTP server for browser extension ──
+        LocalCaptureServer.shared.start()
+
         NSApp.setActivationPolicy(.regular)
 
         print("🚀 ezclip ready")
@@ -50,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyManager.shared.unregister()
+        LocalCaptureServer.shared.stop()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

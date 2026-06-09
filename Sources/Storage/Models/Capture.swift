@@ -25,6 +25,7 @@ struct Capture: Identifiable, Codable, @unchecked Sendable {
     // Design context
     var designFileName: String?
     var designPageName: String?
+    var designContextJSON: String?
 
     // File context
     var filePath: String?

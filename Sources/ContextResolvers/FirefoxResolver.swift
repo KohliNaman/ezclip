@@ -5,6 +5,39 @@ struct FirefoxResolver: AppContextResolver {
 
     func resolve(windowTitle: String, bundleId: String) async throws -> ResolvedContext {
         let pageTitle = extractPageTitle(from: windowTitle)
+
+        // Tier 1: AppleScript
+        let urlScript = """
+        tell application "Firefox"
+            get URL of active tab of front window
+        end tell
+        """
+        let titleScript = """
+        tell application "Firefox"
+            get title of active tab of front window
+        end tell
+        """
+        async let urlTask = ContextResolverEngine.shared.runAppleScriptAsync(
+            urlScript, timeout: 5, label: "firefox_url"
+        )
+        async let titleTask = ContextResolverEngine.shared.runAppleScriptAsync(
+            titleScript, timeout: 5, label: "firefox_title"
+        )
+        let asURL = await urlTask
+        let asTitle = await titleTask
+
+        if let url = asURL {
+            let faviconData = ContextResolverEngine.shared.fetchFavicon(from: url)
+            return ResolvedContext(
+                contextType: .website,
+                url: url,
+                pageTitle: asTitle ?? pageTitle,
+                faviconData: faviconData,
+                browserName: "Firefox"
+            )
+        }
+
+        // Tier 2: Session files
         let url = readSessionURL()
         print("🔍 FirefoxResolver: sessionstore url = \(url ?? "nil")")
 
@@ -15,10 +48,10 @@ struct FirefoxResolver: AppContextResolver {
 
         return ResolvedContext(
             contextType: .website,
-            browserName: "Firefox",
             url: url,
             pageTitle: pageTitle,
-            faviconData: faviconData
+            faviconData: faviconData,
+            browserName: "Firefox"
         )
     }
 

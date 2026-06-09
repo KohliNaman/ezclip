@@ -8,12 +8,36 @@ struct ChromiumResolver: AppContextResolver {
         "company.thebrowser.Browser",
         "com.vivaldi.Vivaldi",
         "com.operasoftware.Opera",
+        "com.kagi.kagimacOS",
+        "com.duckduckgo.macos.browser",
     ]
 
     func resolve(windowTitle: String, bundleId: String) async throws -> ResolvedContext {
         let browserName = browserName(for: bundleId)
-        let (url, title) = readSessionInfo(bundleId: bundleId)
-        let pageTitle = title ?? extractPageTitle(from: windowTitle)
+
+        // Tier 1: AppleScript
+        let (asURL, asTitle) = await resolveViaAppleScript(bundleId: bundleId)
+        if let url = asURL {
+            let pageTitle = asTitle ?? extractPageTitle(from: windowTitle)
+            let faviconData = ContextResolverEngine.shared.fetchFavicon(from: url)
+            return ResolvedContext(
+                contextType: .website,
+                url: url,
+                pageTitle: pageTitle,
+                faviconData: faviconData,
+                browserName: browserName
+            )
+        }
+
+        // Tier 2: Session files
+        let (sessionURL, sessionTitle) = readSessionInfo(bundleId: bundleId)
+
+        // Tier 3: Window title extraction
+        var url = sessionURL
+        var pageTitle = sessionTitle ?? asTitle ?? extractPageTitle(from: windowTitle)
+        if url == nil {
+            url = ContextResolverEngine.shared.extractURL(from: windowTitle)
+        }
 
         var faviconData: Data?
         if let url = url {
@@ -22,11 +46,51 @@ struct ChromiumResolver: AppContextResolver {
 
         return ResolvedContext(
             contextType: .website,
-            browserName: browserName,
             url: url,
             pageTitle: pageTitle,
-            faviconData: faviconData
+            faviconData: faviconData,
+            browserName: browserName
         )
+    }
+
+    // MARK: - Tier 1: AppleScript
+
+    private func resolveViaAppleScript(bundleId: String) async -> (url: String?, title: String?) {
+        let appName = appleScriptAppName(for: bundleId)
+        let urlScript = """
+        tell application "\(appName)"
+            get URL of active tab of front window
+        end tell
+        """
+        let titleScript = """
+        tell application "\(appName)"
+            get title of active tab of front window
+        end tell
+        """
+        let labelBase = appName.replacingOccurrences(of: " ", with: "_").lowercased()
+        async let urlTask = ContextResolverEngine.shared.runAppleScriptAsync(
+            urlScript, timeout: 5, label: "chromium_\(labelBase)_url"
+        )
+        async let titleTask = ContextResolverEngine.shared.runAppleScriptAsync(
+            titleScript, timeout: 5, label: "chromium_\(labelBase)_title"
+        )
+        let url = await urlTask
+        let title = await titleTask
+        return (url, title)
+    }
+
+    private func appleScriptAppName(for bundleId: String) -> String {
+        switch bundleId {
+        case "com.google.Chrome": return "Google Chrome"
+        case "com.brave.Browser": return "Brave Browser"
+        case "com.microsoft.edgemac": return "Microsoft Edge"
+        case "company.thebrowser.Browser": return "Arc"
+        case "com.vivaldi.Vivaldi": return "Vivaldi"
+        case "com.operasoftware.Opera": return "Opera"
+        case "com.kagi.kagimacOS": return "Orion"
+        case "com.duckduckgo.macos.browser": return "DuckDuckGo"
+        default: return "Google Chrome"
+        }
     }
 
     // MARK: - Helpers
@@ -39,12 +103,14 @@ struct ChromiumResolver: AppContextResolver {
         case "company.thebrowser.Browser": return "Arc"
         case "com.vivaldi.Vivaldi": return "Vivaldi"
         case "com.operasoftware.Opera": return "Opera"
+        case "com.kagi.kagimacOS": return "Orion"
+        case "com.duckduckgo.macos.browser": return "DuckDuckGo"
         default: return "Chromium"
         }
     }
 
     private func extractPageTitle(from windowTitle: String) -> String? {
-        let suffixes = [" — Chrome", " — Brave", " — Edge", " — Arc", " — Vivaldi", " — Opera"]
+        let suffixes = [" — Chrome", " — Brave", " — Edge", " — Arc", " — Vivaldi", " — Opera", " — Orion", " — DuckDuckGo"]
         for suffix in suffixes {
             if windowTitle.hasSuffix(suffix) {
                 return String(windowTitle.dropLast(suffix.count))
@@ -88,6 +154,10 @@ struct ChromiumResolver: AppContextResolver {
             base = homeDir.appendingPathComponent("Library/Application Support/Vivaldi")
         case "com.operasoftware.Opera":
             base = homeDir.appendingPathComponent("Library/Application Support/com.operasoftware.Opera")
+        case "com.kagi.kagimacOS":
+            base = homeDir.appendingPathComponent("Library/Application Support/Orion")
+        case "com.duckduckgo.macos.browser":
+            base = homeDir.appendingPathComponent("Library/Application Support/DuckDuckGo")
         default:
             return nil
         }

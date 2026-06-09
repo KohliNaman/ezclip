@@ -7,10 +7,14 @@ struct SafariResolver: AppContextResolver {
         let engine = ContextResolverEngine.shared
 
         async let urlTask = engine.runAppleScriptAsync(
-            "tell application \"Safari\" to get URL of front document"
+            "tell application \"Safari\" to get URL of front document",
+            timeout: 5,
+            label: "safari_url"
         )
         async let titleTask = engine.runAppleScriptAsync(
-            "tell application \"Safari\" to get name of front document"
+            "tell application \"Safari\" to get name of front document",
+            timeout: 5,
+            label: "safari_title"
         )
 
         let url = await urlTask
@@ -23,10 +27,10 @@ struct SafariResolver: AppContextResolver {
 
         return ResolvedContext(
             contextType: .website,
-            browserName: "Safari",
             url: url,
             pageTitle: pageTitle,
-            faviconData: faviconData
+            faviconData: faviconData,
+            browserName: "Safari"
         )
     }
 }

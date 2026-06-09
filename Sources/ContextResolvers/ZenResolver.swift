@@ -20,10 +20,10 @@ struct ZenResolver: AppContextResolver {
 
         return ResolvedContext(
             contextType: .website,
-            browserName: "Zen",
             url: url,
             pageTitle: pageTitle,
-            faviconData: faviconData
+            faviconData: faviconData,
+            browserName: "Zen"
         )
     }
 

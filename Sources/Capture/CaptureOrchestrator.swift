@@ -86,7 +86,8 @@ final class CaptureOrchestrator {
 
             NotificationCenter.default.post(name: .newCaptureCreated, object: capture)
             showNotification(for: capture)
-            CaptureOverlay.shared.show()
+            let thumb = NSImage(contentsOfFile: thumbPath)
+            CaptureOverlay.shared.show(context: context, thumbnail: thumb, appName: windowInfo.appName, bundleId: windowInfo.bundleId)
 
             print("📸 Captured: \(capture.contextDescription)")
 

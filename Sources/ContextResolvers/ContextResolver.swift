@@ -67,15 +67,29 @@ final class ContextResolverEngine: @unchecked Sendable {
             if result.contextType == .generic { result.contextType = .website }
         }
 
+        // Also try decoding percent-encoded URLs found in titles
+        if result.url == nil, let decoded = percentDecode(windowTitle), let extracted = extractURL(from: decoded) {
+            result.url = extracted
+            if result.contextType == .generic { result.contextType = .website }
+        }
+
         return result
     }
 
     /// Extracts a URL from a window title string if one is present.
-    private func extractURL(from text: String) -> String? {
-        guard let range = text.range(of: "https?://[^\\s]+", options: .regularExpression) else {
+    func extractURL(from text: String) -> String? {
+        let decoded = percentDecode(text) ?? text
+        guard let range = decoded.range(of: "https?://[^\\s.,;:!?\\)\\]\\}\\\"]+", options: .regularExpression) else {
             return nil
         }
-        return String(text[range])
+        var url = String(decoded[range])
+        let trailingPunctuation: CharacterSet = .init(charactersIn: ".,;:!?)]}\"")
+        url = url.trimmingCharacters(in: trailingPunctuation)
+        return url
+    }
+
+    private func percentDecode(_ text: String) -> String? {
+        return text.removingPercentEncoding
     }
 
     private func inferContext(appName: String, windowTitle: String, bundleId: String) -> ResolvedContext {
@@ -91,27 +105,59 @@ final class ContextResolverEngine: @unchecked Sendable {
         return ResolvedContext(contextType: .generic)
     }
 
-    // MARK: - Helpers
+    // MARK: - AppleScript with retry
 
-    func runAppleScript(_ source: String, timeout: TimeInterval = 3) -> String? {
-        let script = NSAppleScript(source: source)
-        var error: NSDictionary?
-        let result = script?.executeAndReturnError(&error)
-        if let error = error {
-            let errNum = error[NSAppleScript.errorNumber] as? Int ?? 0
-            // Log all errors now — silencing -1728/-1712 was hiding real failures
-            print("⚠️ AppleScript [\(errNum)]: \(error[NSAppleScript.errorMessage] ?? "unknown")")
-            return nil
+    private static var scriptStats: [String: (success: Int, failure: Int)] = [:]
+    private static let statsLock = NSLock()
+
+    func runAppleScript(_ source: String, timeout: TimeInterval = 5, label: String? = nil) -> String? {
+        let maxRetries = 2
+        var attempt = 0
+        var lastResult: String? = nil
+        var lastError: NSDictionary? = nil
+
+        while attempt <= maxRetries {
+            let script = NSAppleScript(source: source)
+            var error: NSDictionary?
+            let result = script?.executeAndReturnError(&error)
+            if let error = error {
+                let errNum = error[NSAppleScript.errorNumber] as? Int ?? 0
+                print("⚠️ AppleScript [\(errNum)]: \(error[NSAppleScript.errorMessage] ?? "unknown")")
+                lastError = error
+                if (errNum == -1712 || errNum == -1711) && attempt < maxRetries {
+                    attempt += 1
+                    Thread.sleep(forTimeInterval: 0.5)
+                    continue
+                }
+                break
+            }
+            lastResult = result?.stringValue
+            break
         }
-        return result?.stringValue
+
+        // Update stats
+        if let label = label {
+            Self.statsLock.lock()
+            let current = Self.scriptStats[label] ?? (0, 0)
+            if lastResult != nil {
+                Self.scriptStats[label] = (current.success + 1, current.failure)
+            } else {
+                Self.scriptStats[label] = (current.success, current.failure + 1)
+            }
+            let updated = Self.scriptStats[label]!
+            Self.statsLock.unlock()
+            print("📊 AppleScript stats [\(label)]: success=\(updated.success), failure=\(updated.failure)")
+        }
+
+        return lastResult
     }
 
-    func runAppleScriptAsync(_ source: String, timeout: TimeInterval = 3) async -> String? {
+    func runAppleScriptAsync(_ source: String, timeout: TimeInterval = 5, label: String = "") async -> String? {
         // NSAppleScript MUST run on the main thread — dispatching to a background
         // queue causes EXC_BREAKPOINT / SIGTRAP crashes on macOS 14+.
         await withCheckedContinuation { continuation in
             DispatchQueue.main.async {
-                let result = self.runAppleScript(source, timeout: timeout)
+                let result = self.runAppleScript(source, timeout: timeout, label: label.isEmpty ? nil : label)
                 continuation.resume(returning: result)
             }
         }
@@ -135,6 +181,6 @@ final class ContextResolverEngine: @unchecked Sendable {
             end if
         end tell
         """
-        return runAppleScript(script)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return runAppleScript(script, label: "finder_path")?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

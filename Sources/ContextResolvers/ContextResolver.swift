@@ -22,6 +22,7 @@ struct ResolvedContext {
     var designFileName: String?
     var designPageName: String?
     var filePath: String?
+    var browserName: String? = nil
 }
 
 // MARK: - Engine
@@ -34,8 +35,8 @@ final class ContextResolverEngine: @unchecked Sendable {
     private init() {
         resolvers = [
             SafariResolver(),
-            ChromeResolver(),
-            ArcResolver(),
+            ChromiumResolver(),
+            FirefoxResolver(),
             ZenResolver(),
             SpotifyResolver(),
             AppleMusicResolver(),

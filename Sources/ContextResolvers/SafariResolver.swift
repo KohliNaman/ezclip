@@ -23,6 +23,7 @@ struct SafariResolver: AppContextResolver {
 
         return ResolvedContext(
             contextType: .website,
+            browserName: "Safari",
             url: url,
             pageTitle: pageTitle,
             faviconData: faviconData

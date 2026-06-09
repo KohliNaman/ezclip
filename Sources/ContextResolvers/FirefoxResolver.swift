@@ -1,17 +1,12 @@
 import Foundation
-@preconcurrency import AppKit
 
-/// Resolves context from Zen Browser silently via sessionstore.
-///
-/// Reads recovery.jsonlz4 from disk, decompresses mozLz4 with the
-/// shared pure-Swift LZ4 block decoder, and extracts the active tab URL.
-struct ZenResolver: AppContextResolver {
-    let supportedBundleIds = ["app.zen-browser.zen"]
+struct FirefoxResolver: AppContextResolver {
+    let supportedBundleIds = ["org.mozilla.firefox"]
 
     func resolve(windowTitle: String, bundleId: String) async throws -> ResolvedContext {
         let pageTitle = extractPageTitle(from: windowTitle)
         let url = readSessionURL()
-        print("🔍 ZenResolver: sessionstore url = \(url ?? "nil")")
+        print("🔍 FirefoxResolver: sessionstore url = \(url ?? "nil")")
 
         var faviconData: Data?
         if let url = url {
@@ -20,7 +15,7 @@ struct ZenResolver: AppContextResolver {
 
         return ResolvedContext(
             contextType: .website,
-            browserName: "Zen",
+            browserName: "Firefox",
             url: url,
             pageTitle: pageTitle,
             faviconData: faviconData
@@ -37,17 +32,17 @@ struct ZenResolver: AppContextResolver {
     }
 
     private func readSessionURL() -> String? {
-        guard let recoveryURL = SessionstoreUtils.findRecoveryFile(appName: "zen") else {
-            print("⚠️ ZenResolver: no sessionstore file found")
+        guard let recoveryURL = SessionstoreUtils.findRecoveryFile(appName: "Firefox") else {
+            print("⚠️ FirefoxResolver: no sessionstore file found")
             return nil
         }
-        print("🔍 ZenResolver: reading \(recoveryURL.path)")
+        print("🔍 FirefoxResolver: reading \(recoveryURL.path)")
         guard let json = SessionstoreUtils.decompressMozLz4(at: recoveryURL) else {
-            print("⚠️ ZenResolver: decompression failed")
+            print("⚠️ FirefoxResolver: decompression failed")
             return nil
         }
         guard let url = SessionstoreUtils.extractActiveURL(from: json) else {
-            print("⚠️ ZenResolver: no active URL in sessionstore")
+            print("⚠️ FirefoxResolver: no active URL in sessionstore")
             return nil
         }
         return url

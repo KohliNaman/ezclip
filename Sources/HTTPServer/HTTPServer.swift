@@ -14,8 +14,8 @@ final class LocalCaptureServer: @unchecked Sendable {
     )
 
     private(set) var pendingRequestId: UUID?
-    private var pendingContext: [String: Any]?
-    private var contextContinuation: CheckedContinuation<[String: Any]?, Never>?
+    private var pendingContext: Data?
+    private var contextContinuation: CheckedContinuation<Data?, Never>?
 
     private init() {}
 
@@ -137,7 +137,7 @@ final class LocalCaptureServer: @unchecked Sendable {
 
     // MARK: - Wait for extension context
 
-    func waitForContext(timeout: TimeInterval = 5) async -> [String: Any]? {
+    func waitForContext(timeout: TimeInterval = 5) async -> Data? {
         await withCheckedContinuation { continuation in
             lock.lock()
 
@@ -232,12 +232,13 @@ final class LocalCaptureServer: @unchecked Sendable {
             response = httpResponse(status: 200, body: "{\"capturePending\": \(pending)}")
         } else if method == "POST" && path == "/context" {
             if let body = body {
+                let bodyData = try? JSONSerialization.data(withJSONObject: body)
                 lock.lock()
-                pendingContext = body
+                pendingContext = bodyData
                 if let continuation = contextContinuation {
                     contextContinuation = nil
                     lock.unlock()
-                    continuation.resume(returning: body)
+                    continuation.resume(returning: bodyData)
                 } else {
                     lock.unlock()
                 }

@@ -62,8 +62,7 @@ final class CaptureOrchestrator {
             }
 
             let designContextJSON: String? = mergedContext.designContext.flatMap {
-                guard let data = try? JSONSerialization.data(withJSONObject: $0) else { return nil }
-                return String(data: data, encoding: .utf8)
+                String(data: $0, encoding: .utf8)
             }
 
             var capture = Capture(

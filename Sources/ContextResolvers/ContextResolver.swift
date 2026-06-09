@@ -10,7 +10,7 @@ protocol AppContextResolver {
 
 // MARK: - Result
 
-struct ResolvedContext {
+struct ResolvedContext: Sendable {
     var contextType: ContextType
     var url: String?
     var pageTitle: String?
@@ -21,7 +21,7 @@ struct ResolvedContext {
     var albumArtData: Data?
     var designFileName: String?
     var designPageName: String?
-    var designContext: [String: Any]?
+    var designContext: Data?
     var filePath: String?
     var browserName: String? = nil
 }

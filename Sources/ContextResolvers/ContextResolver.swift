@@ -107,7 +107,7 @@ final class ContextResolverEngine: @unchecked Sendable {
 
     // MARK: - AppleScript with retry
 
-    private static var scriptStats: [String: (success: Int, failure: Int)] = [:]
+    private nonisolated(unsafe) static var scriptStats: [String: (success: Int, failure: Int)] = [:]
     private static let statsLock = NSLock()
 
     func runAppleScript(_ source: String, timeout: TimeInterval = 5, label: String? = nil) -> String? {

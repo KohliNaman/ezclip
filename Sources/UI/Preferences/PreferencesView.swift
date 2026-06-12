@@ -38,7 +38,7 @@ struct SettingsView: View {
                 Toggle("Enable hotkey (⌘⌘)", isOn: $hotkeyEnabled)
                     .onChange(of: hotkeyEnabled) { _, enabled in
                         if enabled {
-                            HotkeyManager.shared.register {
+                            _ = HotkeyManager.shared.register {
                                 Task { await CaptureOrchestrator.shared.capture() }
                             }
                         } else {

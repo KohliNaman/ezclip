@@ -53,7 +53,7 @@ final class CaptureRepository {
     }
 
     func replaceTags(for capture: Capture, names: [String]) async throws {
-        try await db.write { db in
+        _ = try await db.write { db in
             try CaptureTag
                 .filter(Column("captureId") == capture.id.uuidString)
                 .deleteAll(db)

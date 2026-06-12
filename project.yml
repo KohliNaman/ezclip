@@ -20,8 +20,8 @@ targets:
     sources:
       - path: Sources
         createIntermediateGroups: true
-    resources:
-      - path: Resources
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     dependencies:
       - package: GRDB
     settings:
@@ -59,6 +59,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclipTests
         SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ezclip.app/Contents/MacOS/ezclip"
         BUNDLE_LOADER: "$(TEST_HOST)"
 

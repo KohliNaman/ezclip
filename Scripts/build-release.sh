@@ -29,10 +29,14 @@ xcodebuild archive \
 
 # Export .app from archive
 echo "==> Exporting .app"
-xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE_PATH" \
-  -exportPath build/ \
-  -exportOptionsPlist Scripts/ExportOptions.plist
+if ! xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath build/ \
+    -exportOptionsPlist Scripts/ExportOptions.plist; then
+    echo "==> Developer ID export failed; using archived app for local DMG"
+    rm -rf "$APP_PATH"
+    cp -R "$ARCHIVE_PATH/Products/Applications/ezclip.app" "$APP_PATH"
+fi
 
 # Package as DMG
 if command -v create-dmg &> /dev/null; then

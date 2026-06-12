@@ -24,7 +24,7 @@ struct SpotifyResolver: AppContextResolver {
     /// some versions.
     private func parseWindowTitle(_ title: String) -> ResolvedContext {
         // Strip Spotify branding suffix
-        var cleaned = title
+        let cleaned = title
             .replacingOccurrences(of: " — Spotify", with: "")
             .replacingOccurrences(of: " - Spotify", with: "")
             .replacingOccurrences(of: " | Spotify", with: "")

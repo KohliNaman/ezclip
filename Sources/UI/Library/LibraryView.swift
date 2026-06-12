@@ -95,7 +95,7 @@ struct LibraryView: View {
         }
         .onAppear {
             // Register global hotkey
-            HotkeyManager.shared.register {
+            _ = HotkeyManager.shared.register {
                 Task { await CaptureOrchestrator.shared.capture() }
             }
         }

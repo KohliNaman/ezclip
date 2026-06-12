@@ -193,7 +193,7 @@ struct ChromiumSessionReader {
             return 32
         }
         let text = String(decoding: scalars, as: UTF8.self)
-        let pattern = #"https?://[^\s\0<>"']+"#
+        let pattern = #"https?://[^\s<>"'\)\]\}]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
 

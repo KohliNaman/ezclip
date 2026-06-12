@@ -87,7 +87,7 @@ final class ContextResolverEngine: @unchecked Sendable {
     /// Extracts a URL from a window title string if one is present.
     func extractURL(from text: String) -> String? {
         let decoded = text.removingPercentEncoding ?? text
-        guard let range = decoded.range(of: "https?://[^\\s.,;:!?\\)\\]\\}\\\"]+", options: .regularExpression) else {
+        guard let range = decoded.range(of: "https?://[^\\s\\)\\]\\}\\\"']+", options: .regularExpression) else {
             return nil
         }
         return String(decoded[range]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}\""))

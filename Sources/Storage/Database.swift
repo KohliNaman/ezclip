@@ -84,6 +84,13 @@ final class DatabaseManager {
             try db.create(index: "idx_tag_name", on: "tag", columns: ["name"])
         }
 
+        migrator.registerMigration("v2_capture_context_updates") { db in
+            try db.alter(table: "capture") { t in
+                t.add(column: "designContextJSON", .text)
+                t.add(column: "contextStatus", .text).defaults(to: "pending")
+            }
+        }
+
         return migrator
     }
 

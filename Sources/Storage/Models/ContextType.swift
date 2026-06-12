@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-enum ContextType: String, Codable, DatabaseValueConvertible, CaseIterable {
+enum ContextType: String, Codable, DatabaseValueConvertible, CaseIterable, Sendable {
     case website
     case music
     case design

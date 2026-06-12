@@ -46,13 +46,33 @@ targets:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
           DEAD_CODE_STRIPPING: YES
+  ezclipTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests
+        createIntermediateGroups: true
+    dependencies:
+      - target: ezclip
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclipTests
+        SWIFT_VERSION: "6.0"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ezclip.app/Contents/MacOS/ezclip"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
   ezclip:
     build:
       targets:
         ezclip: all
+        ezclipTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - ezclipTests
     archive:
       config: Release

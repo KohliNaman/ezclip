@@ -27,20 +27,20 @@ final class CaptureOverlay {
         state.appIcon = appIcon(for: bundleId)
         state.thumbnail = thumbnail
         state.phase = .saved
-        scheduleDismiss(after: 1.4)
+        scheduleDismiss(after: 1.9)
     }
 
     func showEnriched(_ context: ResolvedContext) {
         guard panel != nil else { return }
         state.contextText = contextSummary(context)
         state.phase = .enriched
-        scheduleDismiss(after: 1.1)
+        scheduleDismiss(after: 1.6)
     }
 
     func showFailed() {
         ensurePanel()
         state.phase = .failed
-        scheduleDismiss(after: 1.2)
+        scheduleDismiss(after: 1.6)
     }
 
     private func ensurePanel() {
@@ -99,10 +99,10 @@ final class CaptureOverlay {
         dismissTask?.cancel()
         dismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            withAnimation(.easeInOut(duration: 0.18)) {
+            withAnimation(.easeInOut(duration: 0.34)) {
                 state.phase = .hidden
             }
-            try? await Task.sleep(nanoseconds: 460_000_000)
+            try? await Task.sleep(nanoseconds: 900_000_000)
             panel?.close()
             panel = nil
             hostingView = nil
@@ -191,7 +191,7 @@ private struct NotchOverlayView: View {
                     .foregroundStyle(.white)
             }
         }
-        .opacity(state.phase == .hidden ? 0 : 1)
+        .opacity(state.phase == .hidden ? 0.72 : 1)
         .frame(width: width, height: height)
         .padding(.top, 0)
         .background(
@@ -225,8 +225,8 @@ private struct NotchOverlayView: View {
                 style: .continuous
             )
         )
-        .animation(.spring(response: state.phase == .hidden ? 0.45 : 0.42, dampingFraction: state.phase == .hidden ? 1.0 : 0.8), value: width)
-        .animation(.spring(response: state.phase == .hidden ? 0.45 : 0.42, dampingFraction: state.phase == .hidden ? 1.0 : 0.8), value: height)
+        .animation(.spring(response: state.phase == .hidden ? 0.62 : 0.58, dampingFraction: state.phase == .hidden ? 1.0 : 0.82), value: width)
+        .animation(.spring(response: state.phase == .hidden ? 0.62 : 0.58, dampingFraction: state.phase == .hidden ? 1.0 : 0.82), value: height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -253,7 +253,7 @@ private struct NotchOverlayView: View {
             Image(systemName: "camera.shutter.button.fill")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .symbolEffect(.pulse.byLayer, options: .repeating.speed(0.55), value: state.phase == .capturing)
+                .symbolEffect(.pulse.byLayer, options: .repeating.speed(0.35), value: state.phase == .capturing)
         }
     }
 }

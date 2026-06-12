@@ -5,6 +5,20 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resourc
 ARCHIVE_PATH="build/ezclip.xcarchive"
 APP_PATH="build/ezclip.app"
 DMG_PATH="build/ezclip-v${VERSION}.dmg"
+DEV_SIGN_IDENTITY="${EZCLIP_DEV_SIGN_IDENTITY:-ezclip dev}"
+XCODE_SIGN_ARGS=()
+
+if security find-identity -v -p codesigning | grep -Fq "\"${DEV_SIGN_IDENTITY}\""; then
+    echo "==> Using persistent local signing identity: ${DEV_SIGN_IDENTITY}"
+    XCODE_SIGN_ARGS=(
+      CODE_SIGN_STYLE=Manual
+      DEVELOPMENT_TEAM=
+      CODE_SIGN_IDENTITY="${DEV_SIGN_IDENTITY}"
+      OTHER_CODE_SIGN_FLAGS=--options=runtime
+    )
+else
+    echo "==> Persistent signing identity '${DEV_SIGN_IDENTITY}' not found; using project signing defaults"
+fi
 
 echo "==> Building ezclip v${VERSION}"
 
@@ -20,12 +34,22 @@ fi
 
 # Archive (universal binary, release config)
 echo "==> Archiving"
-xcodebuild archive \
-  -project ezclip.xcodeproj \
-  -scheme ezclip \
-  -configuration Release \
-  -archivePath "$ARCHIVE_PATH" \
-  ONLY_ACTIVE_ARCH=NO
+if [ "${#XCODE_SIGN_ARGS[@]}" -gt 0 ]; then
+    xcodebuild archive \
+      -project ezclip.xcodeproj \
+      -scheme ezclip \
+      -configuration Release \
+      -archivePath "$ARCHIVE_PATH" \
+      ONLY_ACTIVE_ARCH=NO \
+      "${XCODE_SIGN_ARGS[@]}"
+else
+    xcodebuild archive \
+      -project ezclip.xcodeproj \
+      -scheme ezclip \
+      -configuration Release \
+      -archivePath "$ARCHIVE_PATH" \
+      ONLY_ACTIVE_ARCH=NO
+fi
 
 # Export .app from archive
 echo "==> Exporting .app"
@@ -36,6 +60,11 @@ if ! xcodebuild -exportArchive \
     echo "==> Developer ID export failed; using archived app for local DMG"
     rm -rf "$APP_PATH"
     cp -R "$ARCHIVE_PATH/Products/Applications/ezclip.app" "$APP_PATH"
+fi
+
+if security find-identity -v -p codesigning | grep -Fq "\"${DEV_SIGN_IDENTITY}\""; then
+    echo "==> Re-signing local app with ${DEV_SIGN_IDENTITY}"
+    codesign --force --deep --sign "${DEV_SIGN_IDENTITY}" --options runtime "$APP_PATH"
 fi
 
 # Package as DMG

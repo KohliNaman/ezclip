@@ -9,6 +9,7 @@ struct BrowserDesignContext: Codable, Sendable {
     var colors: [ColorInfo]
     var cssTokens: [CSSToken]
     var buttons: [ButtonInfo]
+    var fontFaceCSS: String?
 
     struct ScrollInfo: Codable, Sendable {
         var x: Double
@@ -53,7 +54,8 @@ struct BrowserDesignContext: Codable, Sendable {
 }
 
 enum BrowserDesignContextStore {
-    private static let maxAge: TimeInterval = 20
+    private static let maxExactURLAge: TimeInterval = 10 * 60
+    private static let maxHostAge: TimeInterval = 2 * 60
 
     static var latestContextURL: URL? {
         guard let support = try? FileManager.default.url(
@@ -74,13 +76,11 @@ enum BrowserDesignContextStore {
               let context = try? JSONDecoder.ezclip.decode(BrowserDesignContext.self, from: data)
         else { return nil }
 
-        if let capturedAt = context.capturedAt,
-           abs(capturedAt.timeIntervalSinceNow) > maxAge {
-            return nil
-        }
-
         if let url, let contextURL = context.url,
            normalizedURL(url) != normalizedURL(contextURL) {
+            guard sameHost(url, contextURL),
+                  isFresh(context, maxAge: maxHostAge) else { return nil }
+        } else if !isFresh(context, maxAge: maxExactURLAge) {
             return nil
         }
 
@@ -96,6 +96,17 @@ enum BrowserDesignContextStore {
         guard var components = URLComponents(string: value) else { return value }
         components.fragment = nil
         return components.string ?? value
+    }
+
+    private static func sameHost(_ lhs: String, _ rhs: String) -> Bool {
+        guard let lhsHost = URLComponents(string: lhs)?.host?.lowercased(),
+              let rhsHost = URLComponents(string: rhs)?.host?.lowercased() else { return false }
+        return lhsHost == rhsHost
+    }
+
+    private static func isFresh(_ context: BrowserDesignContext, maxAge: TimeInterval) -> Bool {
+        guard let capturedAt = context.capturedAt else { return true }
+        return abs(capturedAt.timeIntervalSinceNow) <= maxAge
     }
 }
 

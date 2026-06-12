@@ -57,6 +57,21 @@ function ezclipExtractDesignContext() {
     }
   }
 
+  const fontFaceRules = [];
+  for (const sheet of [...document.styleSheets]) {
+    let rules;
+    try {
+      rules = sheet.cssRules;
+    } catch (_) {
+      continue;
+    }
+    for (const rule of [...rules]) {
+      if (rule.type === CSSRule.FONT_FACE_RULE && fontFaceRules.length < 48) {
+        fontFaceRules.push(rule.cssText);
+      }
+    }
+  }
+
   const rgbToHex = (value) => {
     const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
     if (!match) return value;
@@ -138,7 +153,8 @@ function ezclipExtractDesignContext() {
     fonts: [...fontMap.values()].sort((a, b) => b.count - a.count).slice(0, 16),
     colors: [...colorMap.values()].sort((a, b) => b.count - a.count).slice(0, 24),
     cssTokens,
-    buttons
+    buttons,
+    fontFaceCSS: fontFaceRules.join("\n").slice(0, 120000)
   };
 }
 

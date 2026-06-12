@@ -33,9 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Log status only — no custom alert to interfere with native macOS dialogs.
-        // Every reinstall generates a new ad-hoc code signature hash, so macOS
-        // correctly requires re-granting permissions. That's expected behavior
-        // for unsigned apps and cannot be avoided without a paid Developer account.
+        // A persistent local signing identity such as "ezclip dev" keeps TCC
+        // grants stable across rebuilds. Ad-hoc builds may still need re-grants.
         if !tapOk {
             let reason = HotkeyManager.shared.failureReason ?? "unknown"
             print("⚠️ Hotkey inactive: \(reason)")

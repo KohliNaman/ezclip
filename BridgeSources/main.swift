@@ -9,6 +9,7 @@ struct BrowserDesignContext: Codable {
     var colors: [ColorInfo]
     var cssTokens: [CSSToken]
     var buttons: [ButtonInfo]
+    var fontFaceCSS: String?
 
     struct ScrollInfo: Codable {
         var x: Double

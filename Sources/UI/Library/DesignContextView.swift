@@ -11,9 +11,9 @@ struct DesignContextView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(context.fonts.prefix(8)) { font in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(font.sampleText)
-                                    .font(.custom(font.fontFamily, size: CGFloat(Double(font.fontSize.replacingOccurrences(of: "px", with: "")) ?? 15)))
-                                    .lineLimit(1)
+                                FontPreview(font: font, fontFaceCSS: context.fontFaceCSS)
+                                    .frame(height: 32)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
                                 Text("\(font.fontFamily) · \(font.fontSize) · \(font.fontWeight) · \(font.count)x")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -84,9 +84,13 @@ struct DesignContextView: View {
                                     .frame(height: max(58, min(88, button.height + 28)))
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                                    .onTapGesture {
-                                        copy(button.html)
-                                    }
+                                    .overlay(
+                                        Color.clear
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                copy(button.html)
+                                            }
+                                    )
                                     .help("Copy button HTML")
                                 Text(button.text)
                                     .font(.caption)
@@ -132,7 +136,7 @@ private struct ButtonPreview: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = PassthroughScrollWebView(frame: .zero, configuration: configuration)
         view.setValue(false, forKey: "drawsBackground")
         return view
     }
@@ -157,6 +161,49 @@ private struct ButtonPreview: NSViewRepresentable {
     }
 }
 
+private struct FontPreview: NSViewRepresentable {
+    let font: BrowserDesignContext.FontInfo
+    let fontFaceCSS: String?
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        let view = PassthroughScrollWebView(frame: .zero, configuration: configuration)
+        view.setValue(false, forKey: "drawsBackground")
+        return view
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        let family = font.fontFamily.htmlEscaped
+        let sample = font.sampleText.htmlEscaped
+        let size = font.fontSize.htmlEscaped
+        let weight = font.fontWeight.htmlEscaped
+        let css = (fontFaceCSS ?? "").styleBlockSafe
+        let document = """
+        <!doctype html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            \(css)
+            html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
+            body{display:flex;align-items:center;box-sizing:border-box}
+            .sample{font-family:"\(family)", -apple-system, BlinkMacSystemFont, sans-serif;font-size:\(size);font-weight:\(weight);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:CanvasText}
+          </style>
+        </head>
+        <body><div class="sample">\(sample)</div></body>
+        </html>
+        """
+        view.loadHTMLString(document, baseURL: nil)
+    }
+}
+
+private final class PassthroughScrollWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
 private extension BrowserDesignContext.ColorInfo {
     var displayValue: String {
         value.cssHexOrOriginal
@@ -164,6 +211,17 @@ private extension BrowserDesignContext.ColorInfo {
 }
 
 private extension String {
+    var htmlEscaped: String {
+        replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    var styleBlockSafe: String {
+        replacingOccurrences(of: "</style", with: "<\\/style", options: [.caseInsensitive])
+    }
+
     var cssHexOrOriginal: String {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard let range = trimmed.range(of: #"rgba?\(([^\)]+)\)"#, options: .regularExpression) else {

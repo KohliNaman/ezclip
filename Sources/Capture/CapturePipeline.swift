@@ -56,10 +56,7 @@ final class CapturePipeline {
             print("📸 Captured shell: \(windowInfo.appName) — \(windowInfo.windowTitle)")
         } catch CaptureError.permissionDenied {
             CaptureOverlay.shared.showFailed()
-            showPermissionAlert(
-                title: "Screen Recording Permission Required",
-                message: "ezclip needs Screen Recording permission to capture screenshots.\n\nOpen System Settings → Privacy & Security → Screen Recording, then enable ezclip."
-            )
+            print("⚠️ Screen Recording permission not granted; relying on the native macOS permission flow.")
         } catch {
             CaptureOverlay.shared.showFailed()
             print("❌ Capture failed: \(error.localizedDescription)")
@@ -142,17 +139,4 @@ final class CapturePipeline {
         )
     }
 
-    private func showPermissionAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.open(
-                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-            )
-        }
-    }
 }

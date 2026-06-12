@@ -9,6 +9,7 @@ final class CaptureOverlay {
     private var hostingView: NSHostingView<NotchOverlayView>?
     private let state = OverlayState()
     private var dismissTask: Task<Void, Never>?
+    private let panelSize = NSSize(width: 220, height: 72)
 
     private init() {}
 
@@ -47,10 +48,10 @@ final class CaptureOverlay {
 
         let view = NotchOverlayView(state: state)
         let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 184, height: 68)
+        hosting.frame = NSRect(origin: .zero, size: panelSize)
 
         let panel = NotchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 184, height: 68),
+            contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.borderless, .nonactivatingPanel, .hudWindow],
             backing: .buffered,
             defer: false
@@ -69,14 +70,30 @@ final class CaptureOverlay {
             let frame = screen.frame
             let safeTop = max(screen.safeAreaInsets.top, frame.height - screen.visibleFrame.maxY)
             let notchCenterX: CGFloat
+            let notchLeftX: CGFloat
             if safeTop > 25,
                let left = screen.auxiliaryTopLeftArea?.width,
                let right = screen.auxiliaryTopRightArea?.width {
                 notchCenterX = left + (frame.width - left - right) / 2
+                notchLeftX = left
             } else {
                 notchCenterX = frame.midX
+                notchLeftX = notchCenterX
             }
-            panel.setFrameOrigin(NSPoint(x: notchCenterX - 92, y: frame.maxY - max(safeTop, 28) - 18))
+
+            let x: CGFloat
+            if safeTop > 25 {
+                x = max(frame.minX + 8, notchLeftX - panelSize.width + 16)
+            } else {
+                x = notchCenterX - panelSize.width / 2
+            }
+            let y: CGFloat
+            if safeTop > 25 {
+                y = frame.maxY - max(safeTop, 44) + 6
+            } else {
+                y = frame.maxY - panelSize.height - 8
+            }
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
         panel.orderFrontRegardless()
@@ -148,8 +165,8 @@ private struct NotchOverlayView: View {
 
     private var width: CGFloat {
         switch state.phase {
-        case .hidden: 40
-        case .capturing: 52
+        case .hidden: 34
+        case .capturing: 64
         case .saved: state.thumbnail == nil ? 92 : 132
         case .enriched: 172
         case .failed: 86
@@ -158,7 +175,8 @@ private struct NotchOverlayView: View {
 
     private var height: CGFloat {
         switch state.phase {
-        case .hidden, .capturing: 36
+        case .hidden: 34
+        case .capturing: 40
         default: 44
         }
     }
@@ -194,7 +212,8 @@ private struct NotchOverlayView: View {
         .clipShape(Capsule())
         .animation(.spring(response: 0.34, dampingFraction: 0.78), value: width)
         .animation(.easeInOut(duration: 0.16), value: opacity)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .offset(x: state.phase == .hidden ? 22 : 0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
     }
 
     @ViewBuilder

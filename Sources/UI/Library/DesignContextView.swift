@@ -18,6 +18,11 @@ struct DesignContextView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                copy(fontClipboardValue(font))
+                            }
+                            .help("Copy font")
                         }
                     }
                 }
@@ -34,9 +39,14 @@ struct DesignContextView: View {
                                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(color.role).font(.caption2).foregroundStyle(.secondary)
-                                    Text(color.value).font(.caption2).lineLimit(1)
+                                    Text(color.displayValue).font(.caption2).lineLimit(1)
                                 }
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                copy(color.displayValue)
+                            }
+                            .help("Copy color")
                         }
                     }
                 }
@@ -55,6 +65,11 @@ struct DesignContextView: View {
                                     .font(.caption.monospaced())
                                     .lineLimit(2)
                             }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                copy("\(token.name): \(token.value)")
+                            }
+                            .help("Copy CSS token")
                         }
                     }
                 }
@@ -66,13 +81,21 @@ struct DesignContextView: View {
                         ForEach(context.buttons.prefix(12)) { button in
                             VStack(alignment: .leading, spacing: 6) {
                                 ButtonPreview(html: button.html)
-                                    .frame(height: max(54, min(96, button.height + 26)))
+                                    .frame(height: max(58, min(88, button.height + 28)))
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                                    .onTapGesture {
+                                        copy(button.html)
+                                    }
+                                    .help("Copy button HTML")
                                 Text(button.text)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
+                                    .onTapGesture {
+                                        copy(button.text)
+                                    }
+                                    .help("Copy button text")
                             }
                         }
                     }
@@ -89,6 +112,17 @@ struct DesignContextView: View {
                 .foregroundStyle(.secondary)
             content()
         }
+    }
+
+    private func copy(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func fontClipboardValue(_ font: BrowserDesignContext.FontInfo) -> String {
+        let family = font.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+        let googleFamily = family.replacingOccurrences(of: " ", with: "+")
+        return "\(family)\nhttps://fonts.google.com/specimen/\(googleFamily)"
     }
 }
 
@@ -111,14 +145,36 @@ private struct ButtonPreview: NSViewRepresentable {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
-            body{display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}
-            *{max-width:100%;box-sizing:border-box}
+            body{display:flex;align-items:center;justify-content:center;padding:10px;box-sizing:border-box}
+            body>*{max-width:100%;box-sizing:border-box;transform:none!important}
+            button,a{vertical-align:middle;text-decoration:none}
           </style>
         </head>
         <body>\(html)</body>
         </html>
         """
         view.loadHTMLString(document, baseURL: nil)
+    }
+}
+
+private extension BrowserDesignContext.ColorInfo {
+    var displayValue: String {
+        value.cssHexOrOriginal
+    }
+}
+
+private extension String {
+    var cssHexOrOriginal: String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let range = trimmed.range(of: #"rgba?\(([^\)]+)\)"#, options: .regularExpression) else {
+            return self
+        }
+        let body = trimmed[range].drop { $0 != "(" }.dropFirst().dropLast()
+        let parts = body.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 3 else { return self }
+        return "#" + parts.prefix(3)
+            .map { String(format: "%02x", Int(max(0, min(255, $0)))) }
+            .joined()
     }
 }
 

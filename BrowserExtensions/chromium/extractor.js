@@ -57,38 +57,35 @@ function ezclipExtractDesignContext() {
     }
   }
 
-  const cloneWithInlineStyles = (source, depth = 0) => {
-    const clone = source.cloneNode(false);
+  const rgbToHex = (value) => {
+    const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (!match) return value;
+    return "#" + [match[1], match[2], match[3]]
+      .map((part) => Number(part).toString(16).padStart(2, "0"))
+      .join("");
+  };
+
+  const previewHTML = (source, text) => {
+    const tag = source.tagName.toLowerCase() === "a" ? "a" : "button";
+    const clone = document.createElement(tag);
     const style = window.getComputedStyle(source);
     const keep = [
       "display", "align-items", "justify-content", "gap", "padding", "border", "border-radius",
       "background", "background-color", "color", "box-shadow", "font-family", "font-size",
       "font-weight", "line-height", "letter-spacing", "text-transform", "text-decoration",
-      "white-space", "min-width", "height"
+      "white-space", "min-width", "height", "text-align"
     ];
-    clone.removeAttribute("id");
-    clone.removeAttribute("class");
-    clone.removeAttribute("onclick");
-    clone.removeAttribute("href");
-    clone.removeAttribute("target");
-    clone.removeAttribute("aria-controls");
-    clone.removeAttribute("data-testid");
     for (const prop of keep) clone.style.setProperty(prop, style.getPropertyValue(prop));
     clone.style.margin = "0";
     clone.style.position = "relative";
-    if (source.tagName.toLowerCase() === "a") clone.setAttribute("role", "button");
-    if (depth < 2) {
-      for (const child of [...source.childNodes].slice(0, 8)) {
-        if (child.nodeType === Node.TEXT_NODE) {
-          clone.appendChild(document.createTextNode(child.textContent));
-        } else if (child.nodeType === Node.ELEMENT_NODE) {
-          clone.appendChild(cloneWithInlineStyles(child, depth + 1));
-        }
-      }
-    } else {
-      clone.textContent = source.textContent;
-    }
-    return clone;
+    clone.style.boxSizing = "border-box";
+    clone.style.maxWidth = "100%";
+    clone.style.cursor = "default";
+    clone.style.transform = "none";
+    clone.style.animation = "none";
+    clone.textContent = text;
+    if (tag === "a") clone.setAttribute("role", "button");
+    return clone.outerHTML;
   };
 
   const buttonCandidates = [
@@ -116,14 +113,14 @@ function ezclipExtractDesignContext() {
     const style = window.getComputedStyle(el);
     buttons.push({
       text,
-      html: cloneWithInlineStyles(el).outerHTML
+      html: previewHTML(el, text)
         .replaceAll("rgb(255, 255, 255)", "#fff")
         .replaceAll("rgb(0, 0, 0)", "#000")
         .slice(0, 12000),
       width: Math.round(rect.width),
       height: Math.round(rect.height),
-      backgroundColor: style.backgroundColor,
-      color: style.color
+      backgroundColor: rgbToHex(style.backgroundColor),
+      color: rgbToHex(style.color)
     });
     if (buttons.length >= 12) break;
   }

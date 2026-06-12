@@ -35,7 +35,9 @@ final class CaptureRepository {
             capture.albumArtPath = albumArtPath
             capture.designFileName = context.designFileName
             capture.designPageName = context.designPageName
-            capture.designContextJSON = context.designContextJSON
+            if let designContextJSON = context.designContextJSON {
+                capture.designContextJSON = designContextJSON
+            }
             capture.filePath = context.filePath
             capture.contextStatus = "resolved"
 

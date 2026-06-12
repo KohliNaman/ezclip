@@ -30,6 +30,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Test browser extension extractor
+        run: node --test BrowserExtensions/tests/extractor.test.js
+
       # ── Debug build (fast, for PR checks) ──
       - name: Build (Debug)
         run: |

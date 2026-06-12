@@ -60,7 +60,7 @@ struct LibraryView: View {
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 4) {
                         // Scrolling capture button (only for browsers)
-                        if isBrowserFrontmost() {
+                        if ExperimentalFeatures.scrollingCapture && isBrowserFrontmost() {
                             Button(action: {
                                 Task { await CaptureOrchestrator.shared.captureScrolling() }
                             }) {
@@ -95,7 +95,7 @@ struct LibraryView: View {
         }
         .onAppear {
             // Register global hotkey
-            HotkeyManager.shared.register {
+            _ = HotkeyManager.shared.register {
                 Task { await CaptureOrchestrator.shared.capture() }
             }
         }

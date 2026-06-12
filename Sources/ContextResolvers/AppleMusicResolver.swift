@@ -17,7 +17,7 @@ struct AppleMusicResolver: AppContextResolver {
                     return ""
                 end if
             end tell
-            """)
+            """, label: "apple_music_track")
 
         guard let info = info, !info.isEmpty else {
             return ResolvedContext(contextType: .music)

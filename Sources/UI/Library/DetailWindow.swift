@@ -5,7 +5,6 @@ import SwiftUI
 ///
 /// Why a panel instead of .popover:
 ///   - Panel becomes key → keyboard events work reliably
-///   - Panel resigns key on click-outside → natural dismiss behavior
 ///   - No SwiftUI popover view-recreation quirks
 ///   - Arrow keys and Esc work every time
 @MainActor
@@ -58,27 +57,6 @@ final class DetailWindow {
         panel.makeKeyAndOrderFront(nil)
         self.panel = panel
 
-        // Observe resignKey for click-outside dismiss
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
-            object: panel,
-            queue: .main
-        ) { [weak self] _ in
-            // Small delay to allow click-through to other windows
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                // Only dismiss if the main ezclip window didn't become key
-                // (i.e., user clicked outside the app entirely)
-                if NSApp.keyWindow == nil || NSApp.keyWindow == self?.panel {
-                    return // ezclip is still active, or panel is still key
-                }
-                // If ezclip's main window becomes key, user clicked inside the app but
-                // outside the detail panel — dismiss.
-                if NSApp.keyWindow?.isKind(of: NSPanel.self) == false {
-                    self?.onDismiss?()
-                    self?.close()
-                }
-            }
-        }
     }
 
     func close() {

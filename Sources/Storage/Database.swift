@@ -5,13 +5,15 @@ import GRDB
 final class DatabaseManager {
     static let shared = DatabaseManager()
 
-    private var dbQueue: DatabaseQueue!
+    private var dbQueue: DatabaseQueue?
 
     private init() {}
 
     // MARK: - Setup
 
     func setup() throws {
+        if dbQueue != nil { return }
+
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -22,9 +24,9 @@ final class DatabaseManager {
         try FileManager.default.createDirectory(at: ezclipDir, withIntermediateDirectories: true)
 
         let dbPath = ezclipDir.appendingPathComponent("ezclip.sqlite").path
-        dbQueue = try DatabaseQueue(path: dbPath)
-
-        try migrator.migrate(dbQueue)
+        let queue = try DatabaseQueue(path: dbPath)
+        try migrator.migrate(queue)
+        dbQueue = queue
     }
 
     private var migrator: DatabaseMigrator {
@@ -84,17 +86,33 @@ final class DatabaseManager {
             try db.create(index: "idx_tag_name", on: "tag", columns: ["name"])
         }
 
+        migrator.registerMigration("v2_capture_context_updates") { db in
+            let existing = try Set(db.columns(in: "capture").map(\.name))
+            if !existing.contains("designContextJSON") {
+                try db.alter(table: "capture") { t in
+                    t.add(column: "designContextJSON", .text)
+                }
+            }
+            if !existing.contains("contextStatus") {
+                try db.alter(table: "capture") { t in
+                    t.add(column: "contextStatus", .text).defaults(to: "pending")
+                }
+            }
+        }
+
         return migrator
     }
 
     // MARK: - Accessors
 
     func write<T>(_ updates: @escaping (Database) throws -> T) async throws -> T {
-        try await dbQueue.write(updates)
+        try setup()
+        return try dbQueue!.write(updates)
     }
 
     func read<T>(_ value: @escaping (Database) throws -> T) async throws -> T {
-        try await dbQueue.read(value)
+        try setup()
+        return try dbQueue!.read(value)
     }
 
     // MARK: - Tag helpers

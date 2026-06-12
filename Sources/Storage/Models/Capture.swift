@@ -25,6 +25,10 @@ struct Capture: Identifiable, Codable, @unchecked Sendable {
     // Design context
     var designFileName: String?
     var designPageName: String?
+    var designContextJSON: String? = nil
+
+    // Context lifecycle
+    var contextStatus: String? = "pending"
 
     // File context
     var filePath: String?
@@ -74,5 +78,6 @@ extension Capture: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let isScrolling = Column(CodingKeys.isScrolling)
         static let parentCaptureId = Column(CodingKeys.parentCaptureId)
         static let collectionId = Column(CodingKeys.collectionId)
+        static let contextStatus = Column(CodingKeys.contextStatus)
     }
 }

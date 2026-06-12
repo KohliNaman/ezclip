@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "ezclip Design Context",
+  "version": "0.1.0",
+  "description": "Captures active-tab fonts, colors, CSS tokens, and button styles for ezclip screenshots.",
+  "applications": {
+    "gecko": {
+      "id": "ezclip-design-context@namaankohli.com"
+    }
+  },
+  "permissions": ["activeTab", "nativeMessaging", "tabs", "<all_urls>"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_action": {
+    "default_title": "Send design context to ezclip"
+  }
+}

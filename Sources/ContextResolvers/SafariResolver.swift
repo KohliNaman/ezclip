@@ -7,25 +7,22 @@ struct SafariResolver: AppContextResolver {
         let engine = ContextResolverEngine.shared
 
         async let urlTask = engine.runAppleScriptAsync(
-            "tell application \"Safari\" to get URL of front document"
+            "tell application \"Safari\" to get URL of front document",
+            label: "safari_url"
         )
         async let titleTask = engine.runAppleScriptAsync(
-            "tell application \"Safari\" to get name of front document"
+            "tell application \"Safari\" to get name of front document",
+            label: "safari_title"
         )
 
         let url = await urlTask
-        let pageTitle = await titleTask
-
-        var faviconData: Data?
-        if let url = url {
-            faviconData = engine.fetchFavicon(from: url)
-        }
+        let pageTitle = await titleTask ?? (windowTitle.isEmpty ? nil : windowTitle)
 
         return ResolvedContext(
             contextType: .website,
             url: url,
             pageTitle: pageTitle,
-            faviconData: faviconData
+            browserName: "Safari"
         )
     }
 }

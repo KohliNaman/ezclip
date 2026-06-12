@@ -20,10 +20,11 @@ targets:
     sources:
       - path: Sources
         createIntermediateGroups: true
-    resources:
-      - path: Resources
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     dependencies:
       - package: GRDB
+      - target: ezclip-bridge
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclip
@@ -46,13 +47,73 @@ targets:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
           DEAD_CODE_STRIPPING: YES
+    postCompileScripts:
+      - name: Bundle Browser Bridge and Extensions
+        script: |
+          set -euo pipefail
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS"
+          cp "$BUILT_PRODUCTS_DIR/ezclip-bridge" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/ezclip-bridge"
+          mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions"
+          rsync -a --delete "$SRCROOT/BrowserExtensions/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions/"
+          touch "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions/.bundle-stamp"
+        basedOnDependencyAnalysis: true
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/ezclip-bridge
+          - $(SRCROOT)/BrowserExtensions/README.md
+          - $(SRCROOT)/BrowserExtensions/shared/extractor.js
+          - $(SRCROOT)/BrowserExtensions/chromium/manifest.json
+          - $(SRCROOT)/BrowserExtensions/chromium/service-worker.js
+          - $(SRCROOT)/BrowserExtensions/chromium/extractor.js
+          - $(SRCROOT)/BrowserExtensions/firefox/manifest.json
+          - $(SRCROOT)/BrowserExtensions/firefox/background.js
+          - $(SRCROOT)/BrowserExtensions/firefox/extractor.js
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/ezclip-bridge
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/BrowserExtensions/.bundle-stamp
+  ezclip-bridge:
+    type: tool
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: BridgeSources
+        createIntermediateGroups: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclip.bridge
+        PRODUCT_NAME: ezclip-bridge
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_IDENTITY: "-"
+  ezclipTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests
+        createIntermediateGroups: true
+    dependencies:
+      - target: ezclip
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclipTests
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ezclip.app/Contents/MacOS/ezclip"
+        BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
   ezclip:
     build:
       targets:
         ezclip: all
+        ezclipTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - ezclipTests
     archive:
       config: Release

@@ -21,12 +21,20 @@ You should see an identity named `ezclip dev`.
 
 ## Build With It
 
-`./Scripts/build-release.sh` automatically uses `ezclip dev` when present and falls back to the repo's default signing when it is missing.
+For daily iteration, use the fast Debug build/install path:
+
+```sh
+./Scripts/build-dev.sh
+```
+
+It builds arm64 only, installs to `/Applications/ezclip.app`, opens the app, and automatically uses `ezclip dev` when present.
+
+`./Scripts/build-release.sh` uses the same identity when present and creates the release DMG under `build/`.
 
 To use a different identity:
 
 ```sh
-EZCLIP_DEV_SIGN_IDENTITY="My Signing Cert" ./Scripts/build-release.sh
+EZCLIP_DEV_SIGN_IDENTITY="My Signing Cert" ./Scripts/build-dev.sh
 ```
 
 Keep `PRODUCT_BUNDLE_IDENTIFIER` locked to `com.namaankohli.ezclip`. If you reset TCC with `tccutil`, macOS will ask once again, but normal rebuilds should keep permissions.

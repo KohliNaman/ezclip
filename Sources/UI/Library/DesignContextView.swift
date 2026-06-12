@@ -12,7 +12,7 @@ struct DesignContextView: View {
                         ForEach(context.fonts.prefix(8)) { font in
                             VStack(alignment: .leading, spacing: 3) {
                                 FontPreview(font: font, fontFaceCSS: context.fontFaceCSS)
-                                    .frame(height: 32)
+                                    .frame(height: previewHeight(for: font))
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
                                 Text("\(font.fontFamily) · \(font.fontSize) · \(font.fontWeight) · \(font.count)x")
                                     .font(.caption)
@@ -128,6 +128,11 @@ struct DesignContextView: View {
         let googleFamily = family.replacingOccurrences(of: " ", with: "+")
         return "\(family)\nhttps://fonts.google.com/specimen/\(googleFamily)"
     }
+
+    private func previewHeight(for font: BrowserDesignContext.FontInfo) -> CGFloat {
+        let size = Double(font.fontSize.replacingOccurrences(of: "px", with: "")) ?? 18
+        return CGFloat(max(34, min(72, size * 1.32)))
+    }
 }
 
 private struct ButtonPreview: NSViewRepresentable {
@@ -186,9 +191,9 @@ private struct FontPreview: NSViewRepresentable {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             \(css)
-            html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
-            body{display:flex;align-items:center;box-sizing:border-box}
-            .sample{font-family:"\(family)", -apple-system, BlinkMacSystemFont, sans-serif;font-size:\(size);font-weight:\(weight);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:CanvasText}
+            html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;color-scheme:dark}
+            body{display:flex;align-items:center;box-sizing:border-box;padding:2px 0 4px}
+            .sample{font-family:"\(family)", -apple-system, BlinkMacSystemFont, sans-serif;font-size:\(size);font-weight:\(weight);line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.92);-webkit-font-smoothing:antialiased}
           </style>
         </head>
         <body><div class="sample">\(sample)</div></body>
@@ -199,6 +204,10 @@ private struct FontPreview: NSViewRepresentable {
 }
 
 private final class PassthroughScrollWebView: WKWebView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
     override func scrollWheel(with event: NSEvent) {
         nextResponder?.scrollWheel(with: event)
     }

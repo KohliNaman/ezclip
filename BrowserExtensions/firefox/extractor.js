@@ -57,6 +57,20 @@ function ezclipExtractDesignContext() {
     }
   }
 
+  const resolveFontURLs = (cssText, baseHref) => cssText.replace(/url\(([^)]+)\)/gi, (_, rawURL) => {
+    const trimmed = rawURL.trim();
+    const quote = trimmed.startsWith("\"") || trimmed.startsWith("'") ? trimmed[0] : "";
+    const unquoted = quote ? trimmed.slice(1, -1) : trimmed;
+    if (/^(data:|blob:|https?:|file:|chrome-extension:|moz-extension:)/i.test(unquoted)) {
+      return `url(${quote}${unquoted}${quote})`;
+    }
+    try {
+      return `url(${quote}${new URL(unquoted, baseHref || document.baseURI).href}${quote})`;
+    } catch (_) {
+      return `url(${trimmed})`;
+    }
+  });
+
   const fontFaceRules = [];
   for (const sheet of [...document.styleSheets]) {
     let rules;
@@ -67,7 +81,7 @@ function ezclipExtractDesignContext() {
     }
     for (const rule of [...rules]) {
       if (rule.type === CSSRule.FONT_FACE_RULE && fontFaceRules.length < 48) {
-        fontFaceRules.push(rule.cssText);
+        fontFaceRules.push(resolveFontURLs(rule.cssText, sheet.href));
       }
     }
   }

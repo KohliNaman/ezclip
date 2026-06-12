@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
 ARCHIVE_PATH="build/ezclip.xcarchive"
 APP_PATH="build/ezclip.app"

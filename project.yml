@@ -55,7 +55,21 @@ targets:
           cp "$BUILT_PRODUCTS_DIR/ezclip-bridge" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/ezclip-bridge"
           mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions"
           rsync -a --delete "$SRCROOT/BrowserExtensions/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions/"
-        basedOnDependencyAnalysis: false
+          touch "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions/.bundle-stamp"
+        basedOnDependencyAnalysis: true
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/ezclip-bridge
+          - $(SRCROOT)/BrowserExtensions/README.md
+          - $(SRCROOT)/BrowserExtensions/shared/extractor.js
+          - $(SRCROOT)/BrowserExtensions/chromium/manifest.json
+          - $(SRCROOT)/BrowserExtensions/chromium/service-worker.js
+          - $(SRCROOT)/BrowserExtensions/chromium/extractor.js
+          - $(SRCROOT)/BrowserExtensions/firefox/manifest.json
+          - $(SRCROOT)/BrowserExtensions/firefox/background.js
+          - $(SRCROOT)/BrowserExtensions/firefox/extractor.js
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/ezclip-bridge
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/BrowserExtensions/.bundle-stamp
   ezclip-bridge:
     type: tool
     platform: macOS

@@ -2,27 +2,99 @@ import Foundation
 
 enum SessionstoreUtils {
     static func findRecoveryFile(appSupportName: String) -> URL? {
-        let profilesDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/\(appSupportName)/Profiles")
+        let appSupportURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/\(appSupportName)")
+        return findRecoveryFile(appSupportURL: appSupportURL)
+    }
+
+    static func findRecoveryFile(appSupportURL: URL) -> URL? {
+        let profilesDir = appSupportURL.appendingPathComponent("Profiles")
 
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: profilesDir,
-            includingPropertiesForKeys: nil
+            includingPropertiesForKeys: [.contentModificationDateKey]
         ) else { return nil }
 
-        let profile = contents.first { $0.lastPathComponent.localizedCaseInsensitiveContains("default") }
-            ?? contents.first
+        let profilesByName = Dictionary(uniqueKeysWithValues: contents.map { ($0.lastPathComponent, $0) })
+        let orderedProfiles = profilePaths(from: appSupportURL.appendingPathComponent("profiles.ini"))
+            .compactMap { profilesByName[$0.lastPathComponent] ?? (FileManager.default.fileExists(atPath: $0.path) ? $0 : nil) }
 
-        guard let profile else { return nil }
+        let remainingProfiles = contents.filter { profile in
+            !orderedProfiles.contains { $0.standardizedFileURL == profile.standardizedFileURL }
+        }
 
-        let candidates = [
+        return (orderedProfiles + remainingProfiles)
+            .flatMap(recoveryCandidates)
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+            .max { lhs, rhs in
+                modificationDate(lhs) < modificationDate(rhs)
+            }
+    }
+
+    private static func profilePaths(from profilesINI: URL) -> [URL] {
+        guard let text = try? String(contentsOf: profilesINI, encoding: .utf8) else { return [] }
+
+        var installDefault: String?
+        var defaultProfile: String?
+        var profiles: [(path: String, isRelative: Bool, isDefault: Bool)] = []
+        var currentSection: String?
+        var current: [String: String] = [:]
+
+        func flush() {
+            guard let section = currentSection else { return }
+            if section.hasPrefix("Install"), current["Locked"] == "1", let path = current["Default"] {
+                installDefault = path
+            } else if section.hasPrefix("Profile"), let path = current["Path"] {
+                let isDefault = current["Default"] == "1"
+                if isDefault { defaultProfile = path }
+                profiles.append((path, current["IsRelative"] != "0", isDefault))
+            }
+        }
+
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") && line.hasSuffix("]") {
+                flush()
+                currentSection = String(line.dropFirst().dropLast())
+                current = [:]
+            } else if let equals = line.firstIndex(of: "=") {
+                let key = line[..<equals].trimmingCharacters(in: .whitespaces)
+                let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+                current[key] = value
+            }
+        }
+        flush()
+
+        let appSupport = profilesINI.deletingLastPathComponent()
+        var orderedPaths: [String] = []
+        if let installDefault { orderedPaths.append(installDefault) }
+        if let defaultProfile { orderedPaths.append(defaultProfile) }
+        orderedPaths.append(contentsOf: profiles.filter(\.isDefault).map(\.path))
+        orderedPaths.append(contentsOf: profiles.map(\.path))
+
+        var seen = Set<String>()
+        return orderedPaths.compactMap { path in
+            guard seen.insert(path).inserted else { return nil }
+            if path.hasPrefix("/") {
+                return URL(fileURLWithPath: path)
+            }
+            return appSupport.appendingPathComponent(path)
+        }
+    }
+
+    private static func recoveryCandidates(for profile: URL) -> [URL] {
+        [
             profile.appendingPathComponent("sessionstore-backups/recovery.jsonlz4"),
             profile.appendingPathComponent("sessionstore-backups/recovery.baklz4"),
+            profile.appendingPathComponent("sessionstore-backups/previous.jsonlz4"),
             profile.appendingPathComponent("zen-sessions-backup/recovery.jsonlz4"),
             profile.appendingPathComponent("zen-sessions-backup/recovery.baklz4"),
         ]
+    }
 
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    private static func modificationDate(_ url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            ?? .distantPast
     }
 
     static func decompressMozLz4(at url: URL) -> [String: Any]? {
@@ -47,6 +119,16 @@ enum SessionstoreUtils {
     static func extractActiveURL(from json: [String: Any]) -> String? {
         guard let windows = json["windows"] as? [[String: Any]] else { return nil }
 
+        for window in windows {
+            guard let tabs = window["tabs"] as? [[String: Any]] else { continue }
+            guard let selected = window["selected"] as? Int else { continue }
+            let selectedTabIndex = max(0, selected - 1)
+            guard selectedTabIndex < tabs.count,
+                  let url = currentURL(from: tabs[selectedTabIndex])
+            else { continue }
+            return url
+        }
+
         var bestURL: String?
         var bestTime: Double = 0
 
@@ -56,12 +138,7 @@ enum SessionstoreUtils {
             for tab in tabs {
                 guard let lastAccessed = tab["lastAccessed"] as? Double,
                       lastAccessed > bestTime,
-                      let entries = tab["entries"] as? [[String: Any]],
-                      let index = tab["index"] as? Int,
-                      index > 0,
-                      index <= entries.count,
-                      let url = entries[index - 1]["url"] as? String,
-                      !url.hasPrefix("about:")
+                      let url = currentURL(from: tab)
                 else { continue }
 
                 bestTime = lastAccessed
@@ -70,6 +147,17 @@ enum SessionstoreUtils {
         }
 
         return bestURL
+    }
+
+    private static func currentURL(from tab: [String: Any]) -> String? {
+        guard let entries = tab["entries"] as? [[String: Any]],
+              let index = tab["index"] as? Int,
+              index > 0,
+              index <= entries.count,
+              let url = entries[index - 1]["url"] as? String,
+              !url.hasPrefix("about:")
+        else { return nil }
+        return url
     }
 
     private static func lz4Decompress(_ src: Data.SubSequence, expectedSize: Int) -> Data? {

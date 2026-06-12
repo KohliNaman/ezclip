@@ -33,6 +33,64 @@ final class ContextParsingTests: XCTestCase {
         XCTAssertEqual(SessionstoreUtils.extractActiveURL(from: json), "https://newer.example")
     }
 
+    func testSessionstoreActiveURLPrefersSelectedTab() {
+        let json: [String: Any] = [
+            "windows": [[
+                "selected": 1,
+                "tabs": [
+                    [
+                        "lastAccessed": 10.0,
+                        "index": 1,
+                        "entries": [["url": "https://selected.example"]]
+                    ],
+                    [
+                        "lastAccessed": 20.0,
+                        "index": 1,
+                        "entries": [["url": "https://newer-background.example"]]
+                    ]
+                ]
+            ]]
+        ]
+
+        XCTAssertEqual(SessionstoreUtils.extractActiveURL(from: json), "https://selected.example")
+    }
+
+    func testZenRecoveryFileUsesLockedProfilesINIProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ezclip-tests-\(UUID().uuidString)")
+        let emptyProfile = root.appendingPathComponent("Profiles/yxzfgojp.Default Profile")
+        let activeProfile = root.appendingPathComponent("Profiles/npidzgrp.Default (release)")
+        let backups = activeProfile.appendingPathComponent("sessionstore-backups")
+        try FileManager.default.createDirectory(at: emptyProfile, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let profilesINI = """
+        [Install6ED35B3CA1B5D3AF]
+        Default=Profiles/npidzgrp.Default (release)
+        Locked=1
+
+        [Profile1]
+        Name=Default Profile
+        IsRelative=1
+        Path=Profiles/yxzfgojp.Default Profile
+        Default=1
+
+        [Profile0]
+        Name=Default (release)
+        IsRelative=1
+        Path=Profiles/npidzgrp.Default (release)
+        """
+        try profilesINI.data(using: .utf8)!.write(to: root.appendingPathComponent("profiles.ini"))
+        let recovery = backups.appendingPathComponent("recovery.jsonlz4")
+        try Data("fake".utf8).write(to: recovery)
+
+        XCTAssertEqual(
+            SessionstoreUtils.findRecoveryFile(appSupportURL: root)?.standardizedFileURL,
+            recovery.standardizedFileURL
+        )
+    }
+
     func testChromiumSessionReaderUsesLatestSessionURL() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ezclip-tests-\(UUID().uuidString)")

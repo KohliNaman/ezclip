@@ -72,15 +72,22 @@ enum BrowserDesignContextStore {
     static func latestJSON(matching url: String?) -> String? {
         guard let latestContextURL,
               let data = try? Data(contentsOf: latestContextURL),
-              data.count < 750_000,
+              data.count < 750_000
+        else { return nil }
+
+        return latestJSON(from: data, matching: url)
+    }
+
+    static func latestJSON(from data: Data, matching url: String?, now: Date = Date()) -> String? {
+        guard data.count < 750_000,
               let context = try? JSONDecoder.ezclip.decode(BrowserDesignContext.self, from: data)
         else { return nil }
 
         if let url, let contextURL = context.url,
            normalizedURL(url) != normalizedURL(contextURL) {
             guard sameHost(url, contextURL),
-                  isFresh(context, maxAge: maxHostAge) else { return nil }
-        } else if !isFresh(context, maxAge: maxExactURLAge) {
+                  isFresh(context, maxAge: maxHostAge, now: now) else { return nil }
+        } else if !isFresh(context, maxAge: maxExactURLAge, now: now) {
             return nil
         }
 
@@ -104,9 +111,9 @@ enum BrowserDesignContextStore {
         return lhsHost == rhsHost
     }
 
-    private static func isFresh(_ context: BrowserDesignContext, maxAge: TimeInterval) -> Bool {
+    private static func isFresh(_ context: BrowserDesignContext, maxAge: TimeInterval, now: Date) -> Bool {
         guard let capturedAt = context.capturedAt else { return true }
-        return abs(capturedAt.timeIntervalSinceNow) <= maxAge
+        return abs(capturedAt.timeIntervalSince(now)) <= maxAge
     }
 }
 

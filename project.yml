@@ -24,6 +24,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: GRDB
+      - target: ezclip-bridge
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclip
@@ -46,6 +47,31 @@ targets:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
           DEAD_CODE_STRIPPING: YES
+    postCompileScripts:
+      - name: Bundle Browser Bridge and Extensions
+        script: |
+          set -euo pipefail
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS"
+          cp "$BUILT_PRODUCTS_DIR/ezclip-bridge" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/ezclip-bridge"
+          mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions"
+          rsync -a --delete "$SRCROOT/BrowserExtensions/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BrowserExtensions/"
+        basedOnDependencyAnalysis: false
+  ezclip-bridge:
+    type: tool
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: BridgeSources
+        createIntermediateGroups: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.namaankohli.ezclip.bridge
+        PRODUCT_NAME: ezclip-bridge
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_IDENTITY: "-"
   ezclipTests:
     type: bundle.unit-test
     platform: macOS

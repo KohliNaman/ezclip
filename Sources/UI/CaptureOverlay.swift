@@ -9,7 +9,7 @@ final class CaptureOverlay {
     private var hostingView: NSHostingView<NotchOverlayView>?
     private let state = OverlayState()
     private var dismissTask: Task<Void, Never>?
-    private let panelSize = NSSize(width: 220, height: 72)
+    private let panelSize = NSSize(width: 360, height: 96)
 
     private init() {}
 
@@ -69,30 +69,24 @@ final class CaptureOverlay {
         if let screen = NSScreen.main {
             let frame = screen.frame
             let safeTop = max(screen.safeAreaInsets.top, frame.height - screen.visibleFrame.maxY)
+            let notchWidth: CGFloat
             let notchCenterX: CGFloat
-            let notchLeftX: CGFloat
             if safeTop > 25,
                let left = screen.auxiliaryTopLeftArea?.width,
                let right = screen.auxiliaryTopRightArea?.width {
+                notchWidth = max(120, frame.width - left - right)
                 notchCenterX = left + (frame.width - left - right) / 2
-                notchLeftX = left
             } else {
+                notchWidth = 170
                 notchCenterX = frame.midX
-                notchLeftX = notchCenterX
             }
+            state.closedNotchWidth = notchWidth
 
-            let x: CGFloat
-            if safeTop > 25 {
-                x = max(frame.minX + 8, notchLeftX - panelSize.width + 16)
-            } else {
-                x = notchCenterX - panelSize.width / 2
-            }
-            let y: CGFloat
-            if safeTop > 25 {
-                y = frame.maxY - max(safeTop, 44) + 6
-            } else {
-                y = frame.maxY - panelSize.height - 8
-            }
+            let x = min(
+                max(frame.minX + 8, notchCenterX - notchWidth / 2),
+                frame.maxX - panelSize.width - 8
+            )
+            let y = frame.maxY - panelSize.height
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
@@ -108,7 +102,7 @@ final class CaptureOverlay {
             withAnimation(.easeInOut(duration: 0.18)) {
                 state.phase = .hidden
             }
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            try? await Task.sleep(nanoseconds: 460_000_000)
             panel?.close()
             panel = nil
             hostingView = nil
@@ -149,6 +143,7 @@ private final class OverlayState: ObservableObject {
     @Published var contextText: String = ""
     @Published var appIcon: NSImage?
     @Published var thumbnail: NSImage?
+    @Published var closedNotchWidth: CGFloat = 170
 }
 
 private enum OverlayPhase {
@@ -165,24 +160,20 @@ private struct NotchOverlayView: View {
 
     private var width: CGFloat {
         switch state.phase {
-        case .hidden: 34
-        case .capturing: 64
-        case .saved: state.thumbnail == nil ? 92 : 132
-        case .enriched: 172
-        case .failed: 86
+        case .hidden: state.closedNotchWidth
+        case .capturing: state.closedNotchWidth + 72
+        case .saved: state.thumbnail == nil ? state.closedNotchWidth + 108 : state.closedNotchWidth + 140
+        case .enriched: state.closedNotchWidth + 168
+        case .failed: state.closedNotchWidth + 92
         }
     }
 
     private var height: CGFloat {
         switch state.phase {
-        case .hidden: 34
-        case .capturing: 40
-        default: 44
+        case .hidden: 32
+        case .capturing: 48
+        default: 52
         }
-    }
-
-    private var opacity: Double {
-        state.phase == .hidden ? 0 : 1
     }
 
     var body: some View {
@@ -200,20 +191,43 @@ private struct NotchOverlayView: View {
                     .foregroundStyle(.white)
             }
         }
+        .opacity(state.phase == .hidden ? 0 : 1)
         .frame(width: width, height: height)
-        .opacity(opacity)
+        .padding(.top, 0)
         .background(
-            Capsule()
-                .fill(.ultraThinMaterial)
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: state.phase == .hidden ? 14 : 24,
+                bottomTrailingRadius: state.phase == .hidden ? 14 : 24,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+                .fill(.black.opacity(0.92))
                 .environment(\.colorScheme, .dark)
-                .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.32), radius: 12, y: 4)
+                .overlay(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: state.phase == .hidden ? 14 : 24,
+                        bottomTrailingRadius: state.phase == .hidden ? 14 : 24,
+                        topTrailingRadius: 0,
+                        style: .continuous
+                    )
+                    .stroke(.white.opacity(state.phase == .hidden ? 0 : 0.12), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(state.phase == .hidden ? 0 : 0.38), radius: 16, y: 5)
         )
-        .clipShape(Capsule())
-        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: width)
-        .animation(.easeInOut(duration: 0.16), value: opacity)
-        .offset(x: state.phase == .hidden ? 22 : 0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: state.phase == .hidden ? 14 : 24,
+                bottomTrailingRadius: state.phase == .hidden ? 14 : 24,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+        )
+        .animation(.spring(response: state.phase == .hidden ? 0.45 : 0.42, dampingFraction: state.phase == .hidden ? 1.0 : 0.8), value: width)
+        .animation(.spring(response: state.phase == .hidden ? 0.45 : 0.42, dampingFraction: state.phase == .hidden ? 1.0 : 0.8), value: height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -237,9 +251,9 @@ private struct NotchOverlayView: View {
             }
         default:
             Image(systemName: "camera.shutter.button.fill")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
-                .symbolEffect(.pulse, options: .repeating, value: state.phase == .capturing)
+                .symbolEffect(.pulse.byLayer, options: .repeating.speed(0.55), value: state.phase == .capturing)
         }
     }
 }

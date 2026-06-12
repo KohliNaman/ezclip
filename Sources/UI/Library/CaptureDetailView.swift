@@ -28,6 +28,9 @@ struct SimpleDetailView: View {
                     }
 
                     contextSection
+                    if let designContext = BrowserDesignContextStore.decode(viewModel.capture.designContextJSON) {
+                        designContextSection(designContext)
+                    }
                     notesSection
                     metadataSection
                 }
@@ -204,6 +207,18 @@ struct SimpleDetailView: View {
                 Text(p).font(.caption).foregroundColor(.secondary).lineLimit(2)
             }
         }
+    }
+
+    private func designContextSection(_ context: BrowserDesignContext) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Design Context", systemImage: "paintpalette.fill")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            DesignContextView(context: context)
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.3))
+        .cornerRadius(10)
     }
 
     // MARK: - Notes

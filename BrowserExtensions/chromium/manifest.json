@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "ezclip Design Context",
+  "version": "0.1.0",
+  "description": "Captures active-tab fonts, colors, CSS tokens, and button styles for ezclip screenshots.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyljfnbGdymnXXg7ETmIo5fJnEteErV/1sJvYvvuM7OFmTukFR4/9oOet+Pc4htasBTL2QcQrJf1MSu6M8utdMvAqvsshe5fEdieg6lCiXgIBpRG6+P9kUdRb7XK2N7e8SBUeyI8dBM1EFlTr680OAQqU4iKWnLpK0rAfAMPQkJnIOKcO4S2v56W2JlsOVCJPFh5SMEj9HaWkvyLHrgKAcP62jBTXC4pT+nOYI6kT25aMNsTZT4hnzdV0hUY3Jaeym9V+ux9TvDOOcsRouEJytEo0WY+XYpC+A0/eWdz0eR51H0eteQ13gTxO8tNger4p1Txf6bwcAO9Ycl7UHfSBHQIDAQAB",
+  "permissions": ["activeTab", "nativeMessaging", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Send design context to ezclip"
+  }
+}

@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }
 
+        BrowserExtensionInstaller.installNativeMessagingManifests()
         setupMenuBar()
 
         // ── Register hotkey ──

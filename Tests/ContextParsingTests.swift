@@ -55,6 +55,40 @@ final class ContextParsingTests: XCTestCase {
         XCTAssertEqual(SessionstoreUtils.extractActiveURL(from: json), "https://selected.example")
     }
 
+    func testSessionstoreActiveURLMatchesCapturedWindowTitleBeforeFirstWindow() {
+        let json: [String: Any] = [
+            "windows": [
+                [
+                    "selected": 1,
+                    "tabs": [[
+                        "lastAccessed": 30.0,
+                        "index": 1,
+                        "entries": [[
+                            "url": "https://youtube.com/watch?v=music",
+                            "title": "lofi music - YouTube"
+                        ]]
+                    ]]
+                ],
+                [
+                    "selected": 1,
+                    "tabs": [[
+                        "lastAccessed": 20.0,
+                        "index": 1,
+                        "entries": [[
+                            "url": "https://example.com/product",
+                            "title": "Product Design System"
+                        ]]
+                    ]]
+                ]
+            ]
+        ]
+
+        XCTAssertEqual(
+            SessionstoreUtils.extractActiveURL(from: json, matchingWindowTitle: "Product Design System — Zen"),
+            "https://example.com/product"
+        )
+    }
+
     func testZenRecoveryFileUsesLockedProfilesINIProfile() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ezclip-tests-\(UUID().uuidString)")

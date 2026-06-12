@@ -116,17 +116,19 @@ enum SessionstoreUtils {
         return try? JSONSerialization.jsonObject(with: decompressed) as? [String: Any]
     }
 
-    static func extractActiveURL(from json: [String: Any]) -> String? {
+    static func extractActiveURL(from json: [String: Any], matchingWindowTitle windowTitle: String? = nil) -> String? {
         guard let windows = json["windows"] as? [[String: Any]] else { return nil }
 
-        for window in windows {
-            guard let tabs = window["tabs"] as? [[String: Any]] else { continue }
-            guard let selected = window["selected"] as? Int else { continue }
-            let selectedTabIndex = max(0, selected - 1)
-            guard selectedTabIndex < tabs.count,
-                  let url = currentURL(from: tabs[selectedTabIndex])
-            else { continue }
-            return url
+        if let windowTitle,
+           let matched = selectedTabCandidates(in: windows)
+            .max(by: { score($0.title, against: windowTitle) < score($1.title, against: windowTitle) }),
+           score(matched.title, against: windowTitle) > 0 {
+            return matched.url
+        }
+
+        if let selected = selectedTabCandidates(in: windows)
+            .max(by: { $0.lastAccessed < $1.lastAccessed }) {
+            return selected.url
         }
 
         var bestURL: String?
@@ -138,7 +140,7 @@ enum SessionstoreUtils {
             for tab in tabs {
                 guard let lastAccessed = tab["lastAccessed"] as? Double,
                       lastAccessed > bestTime,
-                      let url = currentURL(from: tab)
+                      let url = currentEntry(from: tab)?.url
                 else { continue }
 
                 bestTime = lastAccessed
@@ -149,7 +151,47 @@ enum SessionstoreUtils {
         return bestURL
     }
 
-    private static func currentURL(from tab: [String: Any]) -> String? {
+    private static func selectedTabCandidates(in windows: [[String: Any]]) -> [(url: String, title: String?, lastAccessed: Double)] {
+        windows.compactMap { window in
+            guard let tabs = window["tabs"] as? [[String: Any]],
+                  let selected = window["selected"] as? Int else { return nil }
+            let selectedTabIndex = max(0, selected - 1)
+            guard selectedTabIndex < tabs.count,
+                  let entry = currentEntry(from: tabs[selectedTabIndex])
+            else { return nil }
+            let lastAccessed = tabs[selectedTabIndex]["lastAccessed"] as? Double ?? 0
+            return (entry.url, entry.title, lastAccessed)
+        }
+    }
+
+    private static func score(_ tabTitle: String?, against windowTitle: String) -> Int {
+        guard let tabTitle else { return 0 }
+        let tab = normalizedTitle(tabTitle)
+        let window = normalizedTitle(windowTitle)
+        guard !tab.isEmpty, !window.isEmpty else { return 0 }
+        if tab == window { return 1000 }
+        if window.contains(tab) { return 800 + min(tab.count, 120) }
+        if tab.contains(window) { return 700 + min(window.count, 120) }
+
+        let tabWords = Set(tab.split(separator: " ").map(String.init).filter { $0.count > 2 })
+        let windowWords = Set(window.split(separator: " ").map(String.init).filter { $0.count > 2 })
+        return tabWords.intersection(windowWords).count
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title
+            .replacingOccurrences(of: " — Zen", with: "")
+            .replacingOccurrences(of: " - Zen", with: "")
+            .replacingOccurrences(of: " — Mozilla Firefox", with: "")
+            .replacingOccurrences(of: " - Mozilla Firefox", with: "")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func currentEntry(from tab: [String: Any]) -> (url: String, title: String?)? {
         guard let entries = tab["entries"] as? [[String: Any]],
               let index = tab["index"] as? Int,
               index > 0,
@@ -157,7 +199,7 @@ enum SessionstoreUtils {
               let url = entries[index - 1]["url"] as? String,
               !url.hasPrefix("about:")
         else { return nil }
-        return url
+        return (url, entries[index - 1]["title"] as? String)
     }
 
     private static func lz4Decompress(_ src: Data.SubSequence, expectedSize: Int) -> Data? {

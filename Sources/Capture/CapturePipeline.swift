@@ -69,21 +69,25 @@ final class CapturePipeline {
             bundleId: windowInfo.bundleId,
             windowTitle: windowInfo.windowTitle
         )
+        var enrichedContext = context
+        if enrichedContext.contextType == .website {
+            enrichedContext.designContextJSON = BrowserDesignContextStore.latestJSON(matching: enrichedContext.url)
+        }
 
         do {
-            let faviconPath = saveFaviconIfNeeded(context: context, captureId: capture.id)
-            let albumArtPath = saveAlbumArtIfNeeded(context: context, captureId: capture.id)
+            let faviconPath = saveFaviconIfNeeded(context: enrichedContext, captureId: capture.id)
+            let albumArtPath = saveAlbumArtIfNeeded(context: enrichedContext, captureId: capture.id)
 
             guard let updated = try await repository.updateContext(
                 captureId: capture.id,
-                context: context,
+                context: enrichedContext,
                 faviconPath: faviconPath,
                 albumArtPath: albumArtPath
             ) else { return }
 
             try await repository.replaceTags(for: updated, names: Self.deriveAutoTags(from: updated))
             NotificationCenter.default.post(name: .newCaptureCreated, object: updated)
-            CaptureOverlay.shared.showEnriched(context)
+            CaptureOverlay.shared.showEnriched(enrichedContext)
             showNotification(for: updated)
             print("🧭 Context resolved: \(updated.contextDescription)")
         } catch {

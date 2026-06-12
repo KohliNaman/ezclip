@@ -8,7 +8,7 @@ struct ZenResolver: AppContextResolver {
         let recovery = SessionstoreUtils.findRecoveryFile(appSupportName: "zen")
         let url = recovery
             .flatMap(SessionstoreUtils.decompressMozLz4)
-            .flatMap(SessionstoreUtils.extractActiveURL)
+            .flatMap { SessionstoreUtils.extractActiveURL(from: $0, matchingWindowTitle: windowTitle) }
 
         return ResolvedContext(
             contextType: .website,

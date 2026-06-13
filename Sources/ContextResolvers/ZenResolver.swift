@@ -1,11 +1,13 @@
 import Foundation
 
 struct ZenResolver: AppContextResolver {
-    let supportedBundleIds = ["app.zen-browser.zen"]
+    let supportedBundleIds = ["app.zen-browser.zen", "org.mozilla.firefox"]
 
     func resolve(windowTitle: String, bundleId: String) async throws -> ResolvedContext {
+        let appSupportName = bundleId == "org.mozilla.firefox" ? "Firefox" : "zen"
+        let browserName = bundleId == "org.mozilla.firefox" ? "Firefox" : "Zen"
         let pageTitle = extractPageTitle(from: windowTitle)
-        let recovery = SessionstoreUtils.findRecoveryFile(appSupportName: "zen")
+        let recovery = SessionstoreUtils.findRecoveryFile(appSupportName: appSupportName)
         let url = recovery
             .flatMap(SessionstoreUtils.decompressMozLz4)
             .flatMap { SessionstoreUtils.extractActiveURL(from: $0, matchingWindowTitle: windowTitle) }
@@ -14,7 +16,7 @@ struct ZenResolver: AppContextResolver {
             contextType: .website,
             url: url ?? ContextResolverEngine.shared.extractURL(from: windowTitle),
             pageTitle: pageTitle,
-            browserName: "Zen"
+            browserName: browserName
         )
     }
 

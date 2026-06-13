@@ -83,13 +83,22 @@ enum SessionstoreUtils {
     }
 
     private static func recoveryCandidates(for profile: URL) -> [URL] {
-        [
+        let fixedCandidates = [
             profile.appendingPathComponent("sessionstore-backups/recovery.jsonlz4"),
             profile.appendingPathComponent("sessionstore-backups/recovery.baklz4"),
             profile.appendingPathComponent("sessionstore-backups/previous.jsonlz4"),
             profile.appendingPathComponent("zen-sessions-backup/recovery.jsonlz4"),
             profile.appendingPathComponent("zen-sessions-backup/recovery.baklz4"),
         ]
+        let zenBackupDir = profile.appendingPathComponent("zen-sessions-backup")
+        let zenSnapshots = ((try? FileManager.default.contentsOfDirectory(
+            at: zenBackupDir,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? [])
+            .filter { $0.pathExtension == "jsonlz4" }
+            .sorted { modificationDate($0) > modificationDate($1) }
+
+        return fixedCandidates + zenSnapshots
     }
 
     private static func modificationDate(_ url: URL) -> Date {

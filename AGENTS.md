@@ -16,10 +16,13 @@ Resources are in `Resources/`, release scripts in `Scripts/`, docs in `PRODUCT.m
 
 - `xcodegen generate` regenerates `ezclip.xcodeproj` from `project.yml`.
 - `xcodebuild build -project ezclip.xcodeproj -scheme ezclip -configuration Debug -destination "platform=macOS"` builds the app locally.
+- `xcodebuild test -project ezclip.xcodeproj -scheme ezclip -destination "platform=macOS,arch=arm64"` runs Swift unit tests.
+- `node --test BrowserExtensions/tests/extractor.test.js` runs browser extension extractor tests.
+- `./Scripts/build-dev.sh` builds, installs, and opens a local Debug app in `/Applications/ezclip.app`.
 - `./Scripts/build-release.sh` creates a release archive and DMG under `build/`.
 - `open ezclip.xcodeproj` opens the project for interactive development and running the app.
 
-This repo currently has no checked-in test target. If tests are added, wire them into `project.yml` and CI.
+CI runs both Swift tests and browser extension JavaScript tests.
 
 ## Coding Style & Naming Conventions
 
@@ -29,7 +32,7 @@ Prefer Swift concurrency and platform APIs already used in the codebase. Reserve
 
 ## Testing Guidelines
 
-Until a test target exists, validate changes with a Debug build and focused manual checks. For capture work, verify Screen Recording and Accessibility permission flows, double-Command hotkey behavior, normal window capture, and browser scrolling capture. For storage changes, verify fresh and existing databases under `~/Library/Application Support/ezclip/`.
+Swift tests live in `Tests/` and use XCTest. Browser extension extractor tests live in `BrowserExtensions/tests/` and use Node's built-in test runner. Add fixture-driven tests for resolver parsing, sessionstore parsing, storage updates, and design-context extraction. For capture work, still verify Screen Recording and Accessibility permission flows, double-Command hotkey behavior, normal window capture, and browser design enrichment manually. For storage changes, verify fresh and existing databases under `~/Library/Application Support/ezclip/`.
 
 ## Commit & Pull Request Guidelines
 
@@ -39,4 +42,4 @@ Pull requests should include a short description, user-visible behavior change, 
 
 ## Security & Configuration Tips
 
-Do not commit build products, signing identities, private team IDs, or user data from `~/Library/Application Support/ezclip/`. Treat `Resources/ezclip.entitlements`, `Resources/Info.plist`, `latest.json`, and release packaging changes as high-impact because they affect permissions, updates, and distribution.
+Do not commit build products, signing identities, private team IDs, or user data from `~/Library/Application Support/ezclip/`. Treat `Resources/ezclip.entitlements`, `Resources/Info.plist`, browser extension manifests, native messaging manifests, and release packaging changes as high-impact because they affect permissions, extension connectivity, updates, and distribution.

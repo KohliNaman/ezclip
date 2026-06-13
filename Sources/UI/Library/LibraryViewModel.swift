@@ -7,9 +7,11 @@ final class LibraryViewModel: ObservableObject {
     @Published var captures: [Capture] = []
     @Published var collections: [Collection] = []
     @Published var tags: [Tag] = []
+    @Published var captureTagsByCaptureID: [UUID: Set<String>] = [:]
     @Published var searchText: String = ""
     @Published var selectedContextType: ContextType?
     @Published var selectedCollectionId: UUID?
+    @Published var selectedTagName: String?
     @Published var selectedCapture: Capture?
     @Published var sortOrder: SortOrder = .newest
     @Published var isLoading = false
@@ -45,6 +47,26 @@ final class LibraryViewModel: ObservableObject {
                     .order(Tag.Columns.usageCount.desc)
                     .fetchAll(db)
             }
+            captureTagsByCaptureID = try await db.read { db in
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT captureTag.captureId, tag.name
+                    FROM captureTag
+                    JOIN tag ON tag.id = captureTag.tagId
+                    """
+                )
+
+                var tagsByCapture: [UUID: Set<String>] = [:]
+                for row in rows {
+                    guard
+                        let captureId: UUID = row["captureId"],
+                        let tagName: String = row["name"]
+                    else { continue }
+                    tagsByCapture[captureId, default: []].insert(tagName)
+                }
+                return tagsByCapture
+            }
         } catch {
             print("Failed to load library: \(error)")
         }
@@ -59,6 +81,12 @@ final class LibraryViewModel: ObservableObject {
 
         if let collectionId = selectedCollectionId {
             results = results.filter { $0.collectionId == collectionId }
+        }
+
+        if let selectedTagName {
+            results = results.filter { capture in
+                captureTagsByCaptureID[capture.id]?.contains(selectedTagName) == true
+            }
         }
 
         if !searchText.isEmpty {
@@ -84,6 +112,32 @@ final class LibraryViewModel: ObservableObject {
         }
 
         return results
+    }
+
+    var totalCapturesCount: Int { captures.count }
+
+    func showAllCaptures() {
+        selectedContextType = nil
+        selectedCollectionId = nil
+        selectedTagName = nil
+    }
+
+    func selectContextType(_ type: ContextType) {
+        selectedCollectionId = nil
+        selectedTagName = nil
+        selectedContextType = selectedContextType == type ? nil : type
+    }
+
+    func selectCollection(_ collectionId: UUID?) {
+        selectedContextType = nil
+        selectedTagName = nil
+        selectedCollectionId = collectionId
+    }
+
+    func selectTag(_ tagName: String) {
+        selectedContextType = nil
+        selectedCollectionId = nil
+        selectedTagName = selectedTagName == tagName ? nil : tagName
     }
 
     func deleteCapture(_ capture: Capture) async {

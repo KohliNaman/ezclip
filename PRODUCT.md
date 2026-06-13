@@ -1,164 +1,85 @@
 # ezclip — Product Requirements
 
-> **A context-aware screenshot curator for designers. Save inspiration without losing the source.**
-
----
+> A local-first screenshot library that keeps the source, design language, and context attached to every capture.
 
 ## Vision
 
-Designers collect inspiration obsessively. They screenshot websites, songs, app UIs, typography, color palettes — then dump them into camera rolls, folders called "inspo final v3," or Figma moodboards. Days later, a screenshot is a dead image. What was that website? What song was playing? Which app was that from?
+Screenshots are useful when taken and frustrating a week later. ezclip turns a screenshot into a reusable reference by saving the image, source URL or app context, design tokens, fonts, colors, buttons, music metadata, and notes in one local library.
 
-**ezclip makes every screenshot self-contained.** A single hotkey captures the screen AND the context — the URL, the song name, the source app, the file path. The screenshot isn't just an image anymore; it's a reference you can act on.
-
-The product is NOT an AI tool. It's a curation tool. The intelligence is in the metadata, not in generating anything. It's fast, local, and gets out of your way.
-
----
-
-## Target User
-
-**Primary:** Visual designers (UI/UX, graphic, web) who maintain inspiration libraries.
-**Secondary:** Anyone who bookmarks things visually — developers referencing UI patterns, PMs collecting competitor screenshots, creative directors building moodboards.
-
----
+The product is not an AI generator. It is a fast capture and curation tool for designers, developers, and researchers who collect visual references while working.
 
 ## Core Experience
 
-1. **See something inspiring** — a website, a Spotify track, a Figma file, an app UI.
-2. **Double-tap ⌘⌘** — ezclip captures the frontmost window as a screenshot.
-3. **Context is auto-extracted** — URL, song/artist/album, file name, app name, timestamp.
-4. **Everything saved locally** — browsable library with search, tags, collections.
-5. **Act on it later** — open the URL in browser, play the song in Spotify, open the file in Finder.
+1. Double-tap the left Command key in any app.
+2. A notch-style tray appears immediately while the frontmost window is captured.
+3. ezclip saves the screenshot and thumbnail locally.
+4. Fast context resolves in the background: app, window title, URL, page title, music, Figma, Finder, and tags.
+5. Browser extensions enrich web captures asynchronously with fonts, CSS tokens, colors, scroll position, and rendered button previews.
+6. The library lets users search, filter, revisit URLs, copy metadata, and inspect design context.
 
-That's it. No AI. No cloud. No friction.
+## Current Feature Set
 
----
-
-## Current Status: v0.1 MVP (June 2026)
-
-**What works today:**
-
-| Feature | Status |
+| Area | Current behavior |
 |---|---|
-| ⌘⌘ global hotkey capture | ✅ |
-| Screenshot (frontmost window) | ✅ |
-| Context extraction (Safari, Chrome, Arc) | ✅ URL, page title, favicon |
-| Context extraction (Spotify, Apple Music) | ✅ Song, artist, album |
-| Context extraction (Figma) | ✅ File name, page name |
-| Auto-tagging | ✅ Domain, app name, artist |
-| Library (grid view, search, filter by context type) | ✅ |
-| Menu bar popover + Dock app | ✅ |
-| Collections (create, assign captures) | ✅ |
-| Local storage (SQLite + PNG files) | ✅ |
-| Scrolling screenshot (browser full-page) | ⚠️ v1 hack (AppleScript, visible flicker) |
-| App icon | ⚠️ Placeholder SF Symbol |
-| Code signing / notarization | ❌ |
+| Capture | Double-Command global hotkey, front-window screenshot, clipboard copy, local PNG storage |
+| Feedback | Top-attached notch tray with capture, saved, enriched, and failed states |
+| Browsers | Safari via AppleScript; Chrome and Helium via Chromium resolver; Zen and Firefox via sessionstore parsing |
+| Design context | Optional Chrome/Helium and Zen/Firefox extensions collect fonts, `@font-face`, colors, CSS variables, scroll data, and buttons |
+| Music | Spotify and Apple Music metadata with bounded resolver latency |
+| Design apps | Figma window-title parsing and design classification |
+| Library | Grid view, search, sidebar context filters, tag filters, collections, notes, detail windows |
+| Storage | GRDB SQLite database plus local screenshot, thumbnail, favicon, and album-art files |
+| Packaging | XcodeGen project, Debug dev install script, release DMG script, GitHub Actions build/test workflow |
 
-**What's deliberately NOT in v0.1:**
-- AI features (auto-tagging via vision models, summaries, search-by-description)
-- Cloud sync
-- Browser extensions
-- iOS/iPad companion
-- Video/GIF capture
-- Color palette extraction
-- Typography detection
+## Architecture
 
----
+The capture path is staged so slow metadata never blocks saving:
 
-## Planned Roadmap
+- `HotkeyManager` detects the double-Command gesture.
+- `CaptureOrchestrator` delegates to `CapturePipeline`.
+- `CaptureOverlay` shows visual feedback immediately.
+- `CaptureEngine` captures the frontmost window and `ImageStorageManager` writes image files.
+- `CaptureRepository` inserts the minimal capture, then updates context and tags as they resolve.
+- `ContextResolverEngine` routes to Safari, Chromium, Zen/Firefox, music, Figma, Finder, or generic fallback resolvers.
+- `BrowserDesignContextStore` reads the latest extension payload and attaches it only when fresh and URL-compatible.
+- `ezclip-bridge` is the native messaging host used by the browser extensions.
 
-### v0.2 — Polish & Reliability
-- [ ] Proper app icon
-- [ ] Code signing + notarization (no "unidentified developer" warning)
-- [ ] Smooth scrolling screenshots (browser extension or native WebKit approach)
-- [ ] Firefox browser support
-- [ ] Custom hotkey configuration in preferences
-- [ ] Export as moodboard (single image grid)
-- [ ] Export captures as CSV/JSON catalog
-- [ ] Quick Look preview in library
-- [ ] Dark mode polish
+## Browser Extension Requirements
 
-### v0.3 — Organization & Power Features
-- [ ] Smart collections (auto-group by domain, app, date range)
-- [ ] Tag suggestions based on existing tags
-- [ ] Duplicate detection (same URL already captured?)
-- [ ] Batch actions (tag multiple, move to collection, delete)
-- [ ] Capture from multiple displays correctly
-- [ ] Keyboard shortcuts for library navigation
-- [ ] Drag & drop captures to other apps (Figma, Notion)
+The extensions must never block screenshot capture. They continuously send latest active-tab design context to the native bridge. ezclip matches that payload to a capture by URL and freshness.
 
-### v1.0 — Distribution
-- [ ] Homebrew cask
-- [ ] Auto-update (Sparkle framework)
-- [ ] Onboarding flow (permissions, first capture walkthrough)
-- [ ] Proper website/landing page
-- [ ] Basic analytics (opt-in, privacy-respecting)
+Payloads include:
 
-### v2.0 — Ecosystem
-- [ ] Share captures via link (generate a share URL with image + metadata)
-- [ ] Teams/Shared libraries (shared collection with teammates)
-- [ ] Figma plugin (paste captures directly into Figma files)
-- [ ] iOS companion app (view library on the go)
-- [ ] iCloud sync (optional, encrypted)
+- `url`, `title`, `capturedAt`, and scroll metrics.
+- Visible font samples with family, size, weight, selector, sample text, and usage count.
+- Accessible `@font-face` CSS so previews can render closer to the original site.
+- Prominent text/background colors and root CSS custom properties.
+- Up to 12 visible button/link-button previews with sanitized HTML and computed styles.
 
-### Maybe / Later
-- Color palette extraction from captures
-- Typography detection (what font is that?)
-- OCR text search within screenshots
-- Video capture (record the interaction, not just the screenshot)
-- Integration with design tools (Figma, Sketch, Framer)
+Safari design enrichment is deferred because it requires a Safari App Extension.
 
----
+## Product Principles
 
-## Design Principles
+- **Fast first:** screenshot save and overlay feedback must feel immediate.
+- **Local-first:** no account, cloud sync, or remote processing is required.
+- **Context-aware:** metadata should make the capture actionable without turning the product into an AI tool.
+- **Non-interrupting:** prompts and animations should not break flow.
+- **Designer-quality:** the library and detail views should make visual references easy to scan and reuse.
 
-1. **Fast as fuck.** Capture must feel instant. Library must load in under 200ms. No spinner for basic operations.
-2. **Local-first.** Everything stored on disk. No account required. No cloud dependency. Your inspiration library is yours.
-3. **Context-aware, not AI-powered.** The product's intelligence is in metadata extraction, not generation. We don't summarize, generate, or "enhance." We capture and organize.
-4. **Invisible until needed.** Lives in the menu bar. One hotkey. Doesn't interrupt flow. Library appears when you want to browse.
-5. **Designer-quality aesthetics.** Every pixel matters. The library should feel like a well-designed product, not a developer tool.
+## Release Readiness
 
----
+Public builds should include:
 
-## Competitive Landscape
+- A generated `ezclip.xcodeproj` from `project.yml`.
+- Passing JS extension tests and Swift unit tests.
+- A verified DMG from `./Scripts/build-release.sh`.
+- Native messaging manifests written on app launch for Chrome, Helium, Zen, and Firefox.
+- Clear install notes for browser extensions and macOS Screen Recording/Accessibility permissions.
 
-| Tool | What it does | How ezclip differs |
-|---|---|---|
-| **CleanShot X** | Screenshot annotation + recording | No context extraction, no library/organization |
-| **Eagle** | Design asset management | Heavy, subscription, Windows-centric, no hotkey capture |
-| **Are.na** | Visual bookmarking | Web-based, manual upload, no system-level capture |
-| **Pinterest** | Visual discovery | Platform-locked, algorithm-driven, not a personal tool |
-| **Raindrop.io** | Bookmark manager | Link-first, not visual-first, no screenshot capture |
-| **Codex Appshots** | AI context injection | AI-focused, sends to LLM thread not a library, macOS-only |
+## Near-Term Backlog
 
-ezclip sits at the intersection of **screenshot tool** + **bookmark manager** + **inspiration library**, optimized for speed and context-awareness.
-
----
-
-## Success Metrics (when we measure)
-
-- **Daily active captures:** Are people using the hotkey regularly?
-- **Library retention:** Do captured items get revisited or do they rot?
-- **Context extraction accuracy:** What % of captures have correct URL/song/etc?
-- **Time-to-first-capture:** How fast from download to first ⌘⌘?
-- **NPS / word of mouth:** Are designers telling other designers?
-
----
-
-## Appendix: Context Extraction Strategy
-
-Not all apps expose metadata the same way. Our approach per app:
-
-| App | Method | Reliability |
-|---|---|---|
-| Safari | AppleScript (`URL of front document`) | High |
-| Chrome | AppleScript (`URL of active tab`) | High |
-| Arc | AppleScript + window title parsing | Medium |
-| Firefox | AppleScript (planned v0.2) | Medium |
-| Spotify | AppleScript (`current track` properties) | High |
-| Apple Music | AppleScript (`current track` properties) | High |
-| Figma | Window title parsing (`File — Page — Figma`) | Medium |
-| Finder | AppleScript (`target of front window`) | High |
-| VS Code / Xcode | Window title parsing | Medium |
-| Generic apps | Window title + bundle ID | Always works |
-
-**Long-term:** Move from AppleScript to Accessibility API for more reliable, faster extraction. AppleScript is slow (~300-500ms) and pops permission dialogs.
+- Publish signed browser extensions instead of relying only on unpacked/temporary installs.
+- Add first-run extension install/onboarding UI.
+- Replace deprecated `CGWindowListCreateImage` fallback with a modern ScreenCaptureKit-only path where possible.
+- Add duplicate detection and batch tag/collection actions.
+- Add notarized Developer ID distribution once signing credentials are available.

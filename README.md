@@ -8,9 +8,9 @@ Double-tap ⌘⌘ (Command key) in any app and ezclip captures a screenshot — 
 
 - **⌘⌘ to capture** — double-tap the left Command key. Works in any app, instantly.
 - **Saves the source** — website URL • page title • song + artist • Figma file • Finder path. ezclip remembers where everything came from.
-- **Full-page scrolling captures** — for Safari, Chrome, and Zen Browser. Get the whole page, not just the viewport.
+- **Design context for websites** — optional browser extensions collect fonts, colors, CSS tokens, scroll position, and button previews.
 - **Auto-tags everything** — domain names, app names, artists become searchable tags automatically.
-- **Browse your library** — grid view with search and type filters. Click any capture to see details, copy links, add notes.
+- **Browse your library** — grid view with search, sidebar filters, tags, collections, detail views, copy actions, and notes.
 - **Keyboard-friendly** — arrow keys to flip through captures, Esc to dismiss. No mouse required.
 - **Menu bar + Dock** — always there when you need it, hidden when you don't.
 - **100% local** — nothing leaves your Mac. Your data lives at `~/Library/Application Support/ezclip/`. No cloud, no accounts, no AI.
@@ -19,7 +19,9 @@ Double-tap ⌘⌘ (Command key) in any app and ezclip captures a screenshot — 
 
 | App | Saved context |
 |---|---|
-| Safari, Chrome, Arc, Zen | URL, page title, favicon |
+| Safari | URL, page title, favicon |
+| Chrome, Helium | URL, page title, favicon; optional design context through the Chromium extension |
+| Zen, Firefox | URL and title through sessionstore parsing; optional design context through the Firefox extension |
 | Spotify, Apple Music | Song, artist, album (from window title — captures what you're looking at) |
 | Figma | File name, page name |
 | Finder | Current folder path |
@@ -36,6 +38,15 @@ Double-tap ⌘⌘ (Command key) in any app and ezclip captures a screenshot — 
 2. Open the DMG and drag **ezclip** to your Applications folder
 3. Launch ezclip — first time, **right-click → Open** to bypass Gatekeeper
 4. Grant **Screen Recording** and **Accessibility** permissions when prompted
+
+## Browser extensions
+
+Browser links work without extensions for supported browsers. Install extensions only if you want captured fonts, colors, CSS variables, scroll position, and button previews.
+
+- Chrome/Helium: load `BrowserExtensions/chromium` as an unpacked extension from `chrome://extensions`
+- Zen/Firefox: load `BrowserExtensions/firefox` from `about:debugging#/runtime/this-firefox`
+
+ezclip writes the native messaging host manifests on launch. The bundled bridge stores the latest active-tab design payload locally and screenshot capture never waits on it.
 
 ## How to use
 
@@ -65,7 +76,9 @@ git clone https://github.com/KohliNaman/ezclip.git
 cd ezclip
 brew install xcodegen
 xcodegen generate
-open ezclip.xcodeproj
+node --test BrowserExtensions/tests/extractor.test.js
+xcodebuild test -project ezclip.xcodeproj -scheme ezclip -destination "platform=macOS,arch=arm64"
+./Scripts/build-dev.sh
 ```
 
 Requires Xcode 16+ and Swift 6.

@@ -6,33 +6,46 @@ struct SidebarView: View {
     @State private var newCollectionName = ""
 
     var body: some View {
-        List(selection: $viewModel.selectedCollectionId) {
+        List {
             // Quick actions
             Section {
-                Label("All Captures", systemImage: "square.grid.2x2")
-                    .tag(nil as UUID?)
-                    .onTapGesture {
-                        viewModel.selectedCollectionId = nil
-                    }
+                sidebarButton(
+                    title: "All Captures",
+                    icon: "square.grid.2x2",
+                    count: viewModel.totalCapturesCount,
+                    isSelected: viewModel.selectedContextType == nil
+                        && viewModel.selectedCollectionId == nil
+                        && viewModel.selectedTagName == nil
+                ) {
+                    viewModel.showAllCaptures()
+                }
             }
 
             // Context type groups
             Section("Context") {
                 ForEach(ContextType.allCases, id: \.self) { type in
-                    Label(type.displayName, systemImage: type.iconName)
-                        .tag(type.rawValue.hashValue)  // dummy tag for visual only
-                        .badge(countFor(type))
-                        .onTapGesture {
-                            viewModel.selectedContextType = viewModel.selectedContextType == type ? nil : type
-                        }
+                    sidebarButton(
+                        title: type.displayName,
+                        icon: type.iconName,
+                        count: countFor(type),
+                        isSelected: viewModel.selectedContextType == type
+                    ) {
+                        viewModel.selectContextType(type)
+                    }
                 }
             }
 
             // Collections
             Section("Collections") {
                 ForEach(viewModel.collections) { collection in
-                    Label(collection.name, systemImage: collection.icon)
-                        .tag(collection.id as UUID?)
+                    sidebarButton(
+                        title: collection.name,
+                        icon: collection.icon,
+                        count: nil,
+                        isSelected: viewModel.selectedCollectionId == collection.id
+                    ) {
+                        viewModel.selectCollection(collection.id)
+                    }
                 }
 
                 Button(action: { showingNewCollection = true }) {
@@ -45,16 +58,13 @@ struct SidebarView: View {
             // Popular tags
             Section("Tags") {
                 ForEach(viewModel.tags.prefix(15)) { tag in
-                    HStack {
-                        Label(tag.name, systemImage: "tag")
-                            .lineLimit(1)
-                        Spacer()
-                        Text("\(tag.usageCount)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .onTapGesture {
-                        viewModel.searchText = tag.name
+                    sidebarButton(
+                        title: tag.name,
+                        icon: "tag",
+                        count: tag.usageCount,
+                        isSelected: viewModel.selectedTagName == tag.name
+                    ) {
+                        viewModel.selectTag(tag.name)
                     }
                 }
 
@@ -100,5 +110,31 @@ struct SidebarView: View {
 
     private func countFor(_ type: ContextType) -> Int {
         viewModel.captures.filter { $0.contextType == type }.count
+    }
+
+    private func sidebarButton(
+        title: String,
+        icon: String,
+        count: Int?,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Label(title, systemImage: icon)
+                    .lineLimit(1)
+                Spacer()
+                if let count {
+                    Text("\(count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .listRowBackground(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
     }
 }

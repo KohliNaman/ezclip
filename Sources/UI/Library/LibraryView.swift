@@ -94,6 +94,7 @@ struct LibraryView: View {
             SettingsView()
         }
         .onAppear {
+            guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
             // Register global hotkey
             _ = HotkeyManager.shared.register {
                 Task { await CaptureOrchestrator.shared.capture() }
@@ -204,38 +205,7 @@ struct FilterBar: View {
             .background(.quaternary.opacity(0.5))
             .cornerRadius(6)
 
-            Divider()
-                .frame(height: 20)
-
-            // Context type filter pills
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    FilterPill(
-                        label: "All",
-                        icon: nil,
-                        isSelected: viewModel.selectedContextType == nil
-                    ).onTapGesture {
-                        viewModel.selectedContextType = nil
-                    }
-
-                    ForEach(ContextType.allCases, id: \.self) { type in
-                        FilterPill(
-                            label: type.displayName,
-                            icon: type.iconName,
-                            isSelected: viewModel.selectedContextType == type
-                        ).onTapGesture {
-                            viewModel.selectedContextType = viewModel.selectedContextType == type ? nil : type
-                        }
-                    }
-                }
-            }
-
             Spacer()
-
-            // Caption count
-            Text("\(viewModel.filteredCaptures.count) captures")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

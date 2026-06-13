@@ -82,8 +82,16 @@ struct CaptureCardView: View {
                 .stroke(.quaternary, lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
-        .onAppear {
-            thumbnail = ImageStorageManager.shared.thumbnailImage(for: capture)
+        .task(id: capture.id) {
+            thumbnail = nil
+            let loaded = await Task.detached(priority: .utility) {
+                ImageStorageManager.shared.thumbnailImage(for: capture)
+            }.value
+            guard !Task.isCancelled else { return }
+            thumbnail = loaded
+        }
+        .onDisappear {
+            thumbnail = nil
         }
     }
 }

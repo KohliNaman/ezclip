@@ -10,16 +10,18 @@ struct SimpleDetailView: View {
     @ObservedObject var viewModel: DetailViewModel
     let onDismiss: () -> Void
 
-    @State private var fullImage: NSImage?
+    @State private var previewImage: NSImage?
     @State private var notes: String = ""
     @State private var isEditingNotes = false
     @State private var eventMonitor: Any?
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var activeMagnification: CGFloat = 1.0
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            ScrollView {
+            ScrollView([.vertical, .horizontal]) {
                 VStack(alignment: .leading, spacing: 20) {
                     imageView
 
@@ -39,7 +41,10 @@ struct SimpleDetailView: View {
         }
         .frame(minWidth: 700, idealWidth: 760, minHeight: 560)
         .onAppear { installKeyMonitor(); loadCapture() }
-        .onDisappear { removeKeyMonitor() }
+        .onDisappear {
+            removeKeyMonitor()
+            previewImage = nil
+        }
         .onChange(of: viewModel.currentIndex) { _, _ in loadCapture() }
     }
 
@@ -68,9 +73,11 @@ struct SimpleDetailView: View {
     // MARK: - Load
 
     private func loadCapture() {
-        fullImage = ImageStorageManager.shared.fullImage(for: viewModel.capture)
+        previewImage = ImageStorageManager.shared.previewImage(for: viewModel.capture)
         notes = viewModel.capture.notes ?? ""
         isEditingNotes = false
+        zoomScale = 1.0
+        activeMagnification = 1.0
     }
 
     // MARK: - Toolbar
@@ -101,13 +108,12 @@ struct SimpleDetailView: View {
                 }) { Label("Finder", systemImage: "folder") }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button(action: {
-                    if let img = fullImage {
+                    if let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.writeObjects([img])
                     }
                 }) { Label("Copy Image", systemImage: "doc.on.doc") }
                 .buttonStyle(.bordered).controlSize(.small)
-                .disabled(fullImage == nil)
                 Button { onDismiss() } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3).foregroundStyle(.secondary)
@@ -122,13 +128,27 @@ struct SimpleDetailView: View {
 
     private var imageView: some View {
         Group {
-            if let img = fullImage {
+            if let img = previewImage {
                 Image(nsImage: img)
-                    .resizable().aspectRatio(contentMode: .fit)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(clampedZoom(zoomScale * activeMagnification), anchor: .center)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                activeMagnification = value
+                            }
+                            .onEnded { value in
+                                zoomScale = clampedZoom(zoomScale * value)
+                                activeMagnification = 1.0
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        zoomScale = zoomScale == 1.0 ? 2.0 : 1.0
+                    }
                     .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                    .onTapGesture { onDismiss() }
             } else {
                 RoundedRectangle(cornerRadius: 8).fill(.quaternary)
                     .frame(height: 300).overlay(ProgressView())
@@ -175,7 +195,8 @@ struct SimpleDetailView: View {
             if let t = viewModel.capture.pageTitle { Text(t).font(.body).fontWeight(.medium) }
             if let u = viewModel.capture.url {
                 HStack(spacing: 6) {
-                    if let fp = viewModel.capture.faviconPath, let fi = NSImage(contentsOfFile: fp) {
+                    if let fp = viewModel.capture.faviconPath,
+                       let fi = ImageStorageManager.shared.faviconImage(path: fp) {
                         Image(nsImage: fi).resizable().frame(width: 16, height: 16).cornerRadius(3)
                     }
                     Text(u).font(.callout).foregroundColor(.blue).lineLimit(2)
@@ -258,5 +279,9 @@ struct SimpleDetailView: View {
             Text(k).font(.caption).foregroundColor(.secondary).frame(width: 70, alignment: .leading)
             Text(v).font(.caption).lineLimit(2)
         }
+    }
+
+    private func clampedZoom(_ value: CGFloat) -> CGFloat {
+        min(max(value, 0.75), 4.0)
     }
 }

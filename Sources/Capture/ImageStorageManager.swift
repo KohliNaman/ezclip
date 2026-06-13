@@ -1,11 +1,13 @@
 @preconcurrency import AppKit
 import Foundation
+import ImageIO
 import UniformTypeIdentifiers
 
 final class ImageStorageManager: @unchecked Sendable {
     static let shared = ImageStorageManager()
 
     private let storageRoot: URL
+    private let imageCache = NSCache<NSString, NSImage>()
 
     private init() {
         let appSupport = FileManager.default.urls(
@@ -14,6 +16,9 @@ final class ImageStorageManager: @unchecked Sendable {
         ).first!
         storageRoot = appSupport.appendingPathComponent("ezclip/Screenshots")
         try? FileManager.default.createDirectory(at: storageRoot, withIntermediateDirectories: true)
+
+        imageCache.countLimit = 160
+        imageCache.totalCostLimit = 96 * 1024 * 1024
     }
 
     func screenshotDir(for date: Date = Date()) -> URL {
@@ -52,12 +57,42 @@ final class ImageStorageManager: @unchecked Sendable {
     }
 
     func thumbnailImage(for capture: Capture) -> NSImage? {
-        if let img = NSImage(contentsOfFile: capture.thumbnailPath) {
+        if let thumbnail = cachedImage(path: capture.thumbnailPath, maxPixelSize: 420) {
+            return thumbnail
+        }
+        guard let full = previewImage(for: capture, maxPixelSize: 420) else { return nil }
+        return createThumbnail(from: full, maxDimension: 400)
+    }
+
+    func previewImage(for capture: Capture, maxPixelSize: CGFloat = 1800) -> NSImage? {
+        cachedImage(path: capture.screenshotPath, maxPixelSize: maxPixelSize)
+    }
+
+    func faviconImage(path: String) -> NSImage? {
+        cachedImage(path: path, maxPixelSize: 32)
+    }
+
+    func clearDecodedImageCache() {
+        imageCache.removeAllObjects()
+    }
+
+    private func cachedImage(path: String, maxPixelSize: CGFloat) -> NSImage? {
+        let key = "\(path)#\(Int(maxPixelSize))" as NSString
+        if let image = imageCache.object(forKey: key) {
+            return image
+        }
+
+        if let image = downsampledImage(at: URL(fileURLWithPath: path), maxPixelSize: maxPixelSize) {
+            imageCache.setObject(image, forKey: key, cost: estimatedCost(for: image))
+            return image
+        }
+
+        if let img = NSImage(contentsOfFile: path) {
+            imageCache.setObject(img, forKey: key, cost: estimatedCost(for: img))
             return img
         }
-        // Fallback: generate from full
-        guard let full = fullImage(for: capture) else { return nil }
-        return createThumbnail(from: full, maxDimension: 400)
+
+        return nil
     }
 
     func deleteImages(for capture: Capture) throws {
@@ -114,6 +149,33 @@ final class ImageStorageManager: @unchecked Sendable {
         thumbnail.unlockFocus()
 
         return thumbnail
+    }
+
+    private func downsampledImage(at url: URL, maxPixelSize: CGFloat) -> NSImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary) else {
+            return nil
+        }
+
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize)
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
+    private func estimatedCost(for image: NSImage) -> Int {
+        let width = max(1, Int(image.size.width))
+        let height = max(1, Int(image.size.height))
+        return width * height * 4
     }
 }
 

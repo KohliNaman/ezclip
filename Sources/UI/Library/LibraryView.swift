@@ -26,15 +26,27 @@ struct LibraryView: View {
                     ScrollView {
                         LazyVGrid(columns: gridColumns, spacing: 12) {
                             ForEach(viewModel.filteredCaptures) { capture in
-                                CaptureCardView(capture: capture)
+                                CaptureCardView(
+                                    capture: capture,
+                                    isSelected: viewModel.selectedCaptureIDs.contains(capture.id),
+                                    showsSelection: viewModel.isSelectionMode
+                                )
                                     .onTapGesture {
-                                        openDetail(for: capture)
+                                        if viewModel.isSelectionMode {
+                                            viewModel.toggleSelection(for: capture)
+                                        } else {
+                                            openDetail(for: capture)
+                                        }
                                     }
                                     .contextMenu {
                                         Button("Open in Browser") {
                                             openInBrowser(capture)
                                         }
                                         .disabled(capture.url == nil)
+
+                                        Divider()
+
+                                        collectionMenu(for: capture)
 
                                         Divider()
 
@@ -58,7 +70,7 @@ struct LibraryView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 8) {
                         // Scrolling capture button (only for browsers)
                         if ExperimentalFeatures.scrollingCapture && isBrowserFrontmost() {
                             Button(action: {
@@ -67,6 +79,42 @@ struct LibraryView: View {
                                 Label("Full Page", systemImage: "scroll")
                             }
                             .help("Capture scrolling screenshot")
+                        }
+
+                        if viewModel.isSelectionMode {
+                            Menu {
+                                ForEach(viewModel.collections) { collection in
+                                    Button(collection.name) {
+                                        Task { await viewModel.assignSelectedCaptures(to: collection.id) }
+                                    }
+                                }
+                                if !viewModel.collections.isEmpty {
+                                    Divider()
+                                }
+                                Button("Remove from Collection") {
+                                    Task { await viewModel.assignSelectedCaptures(to: nil) }
+                                }
+                            } label: {
+                                Label("Add To", systemImage: "folder.badge.plus")
+                            }
+                            .disabled(viewModel.selectedCaptureIDs.isEmpty)
+
+                            Button(role: .destructive) {
+                                Task { await viewModel.deleteSelectedCaptures() }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .disabled(viewModel.selectedCaptureIDs.isEmpty)
+                        }
+
+                        Button {
+                            if viewModel.isSelectionMode {
+                                viewModel.clearSelection()
+                            } else {
+                                viewModel.isSelectionMode = true
+                            }
+                        } label: {
+                            Label(viewModel.isSelectionMode ? "Cancel" : "Select", systemImage: viewModel.isSelectionMode ? "xmark" : "checkmark.circle")
                         }
 
                         // Sort picker
@@ -118,34 +166,45 @@ struct LibraryView: View {
                 .font(.system(size: 48))
                 .foregroundColor(.secondary.opacity(0.5))
 
-            Text("No captures yet")
+            Text(viewModel.selectedCollection == nil ? "No captures yet" : "No captures in this collection")
                 .font(.title2)
                 .fontWeight(.medium)
 
-            Text("Press ⌘⌘ in any app to capture a screenshot with context.")
+            Text(viewModel.selectedCollection == nil
+                 ? "Press ⌘⌘ in any app to capture a screenshot with context."
+                 : "Use Select mode or a card context menu from All Captures to add screenshots here.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
 
-            HStack(spacing: 4) {
-                Text("⌘")
-                    .font(.caption)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(.quaternary)
-                    .cornerRadius(4)
-                Text("+")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text("⌘")
-                    .font(.caption)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(.quaternary)
-                    .cornerRadius(4)
+            if viewModel.selectedCollection == nil {
+                HStack(spacing: 4) {
+                    Text("⌘")
+                        .font(.caption)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(.quaternary)
+                        .cornerRadius(4)
+                    Text("+")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("⌘")
+                        .font(.caption)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(.quaternary)
+                        .cornerRadius(4)
+                }
+                .fontDesign(.monospaced)
+            } else {
+                Button {
+                    viewModel.showAllCaptures()
+                    viewModel.isSelectionMode = true
+                } label: {
+                    Label("Select Captures", systemImage: "checkmark.circle")
+                }
             }
-            .fontDesign(.monospaced)
 
             Spacer()
         }
@@ -165,6 +224,27 @@ struct LibraryView: View {
     private func openInBrowser(_ capture: Capture) {
         guard let urlStr = capture.url, let url = URL(string: urlStr) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    @ViewBuilder
+    private func collectionMenu(for capture: Capture) -> some View {
+        Menu("Add to Collection") {
+            if viewModel.collections.isEmpty {
+                Text("No Collections")
+            } else {
+                ForEach(viewModel.collections) { collection in
+                    Button(collection.name) {
+                        Task { await viewModel.assignToCollection(capture.id, collectionId: collection.id) }
+                    }
+                }
+            }
+            if capture.collectionId != nil {
+                Divider()
+                Button("Remove from Collection") {
+                    Task { await viewModel.assignToCollection(capture.id, collectionId: nil) }
+                }
+            }
+        }
     }
 
     private func isBrowserFrontmost() -> Bool {

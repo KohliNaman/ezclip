@@ -84,6 +84,7 @@ struct SidebarView: View {
                 TextField("Collection name", text: $newCollectionName)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 250)
+                    .onSubmit { createCollection() }
 
                 HStack {
                     Button("Cancel") {
@@ -93,14 +94,10 @@ struct SidebarView: View {
                     .keyboardShortcut(.escape)
 
                     Button("Create") {
-                        Task {
-                            await viewModel.addCollection(name: newCollectionName)
-                            showingNewCollection = false
-                            newCollectionName = ""
-                        }
+                        createCollection()
                     }
                     .keyboardShortcut(.return)
-                    .disabled(newCollectionName.isEmpty)
+                    .disabled(newCollectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .padding(30)
@@ -131,10 +128,22 @@ struct SidebarView: View {
                         .monospacedDigit()
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? .primary : .secondary)
         .listRowBackground(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+    }
+
+    private func createCollection() {
+        let name = newCollectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task {
+            await viewModel.addCollection(name: name)
+            showingNewCollection = false
+            newCollectionName = ""
+        }
     }
 }

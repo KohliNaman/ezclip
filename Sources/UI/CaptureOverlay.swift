@@ -103,7 +103,7 @@ final class CaptureOverlay {
             state.closedNotchWidth = notchWidth
 
             let x = min(
-                max(frame.minX + 8, notchCenterX - notchWidth / 2),
+                max(frame.minX + 8, notchCenterX - panelSize.width / 2),
                 frame.maxX - panelSize.width - 8
             )
             let y = frame.maxY - panelSize.height
@@ -199,19 +199,10 @@ private struct NotchOverlayView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            leadIcon
-
-            if state.phase == .enriched {
-                Text(state.contextText)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.86))
-                    .lineLimit(1)
-            } else if state.phase == .saved, state.thumbnail != nil {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-            }
+        HStack(spacing: 0) {
+            leadingContent
+            Spacer()
+            trailingContent
         }
         .opacity(state.phase == .hidden ? 0.72 : 1)
         .frame(width: width, height: height)
@@ -250,11 +241,11 @@ private struct NotchOverlayView: View {
         )
         .animation(.spring(response: state.phase == .hidden ? 0.52 : 0.72, dampingFraction: state.phase == .hidden ? 1.0 : 0.86), value: width)
         .animation(.spring(response: state.phase == .hidden ? 0.52 : 0.72, dampingFraction: state.phase == .hidden ? 1.0 : 0.86), value: height)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
-    private var leadIcon: some View {
+    private var leadingContent: some View {
         switch state.phase {
         case .failed:
             Image(systemName: "xmark")
@@ -268,15 +259,30 @@ private struct NotchOverlayView: View {
                     .frame(width: 22, height: 22)
                     .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             } else {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
+                EmptyView()
             }
         default:
             Image(systemName: "camera.shutter.button.fill")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
                 .symbolEffect(.pulse.byLayer, options: .repeating.speed(0.35), value: state.phase == .capturing)
+        }
+    }
+
+    @ViewBuilder
+    private var trailingContent: some View {
+        switch state.phase {
+        case .enriched:
+            Text(state.contextText)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(1)
+        case .saved:
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+        default:
+            EmptyView()
         }
     }
 }

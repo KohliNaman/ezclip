@@ -21,7 +21,7 @@ struct SimpleDetailView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            ScrollView {
+            ScrollView([.vertical, .horizontal]) {
                 VStack(alignment: .leading, spacing: 20) {
                     imageView
 
@@ -59,12 +59,6 @@ struct SimpleDetailView: View {
 
             switch Int(event.keyCode) {
             case 53: onDismiss(); return nil                              // Esc
-            case 36, 76:
-                if isEditingNotes {
-                    saveNotes()
-                    return nil
-                }
-                return event                                               // Return / Enter
             case 123: viewModel.goPrevious(); return nil                  // ←
             case 124: viewModel.goNext(); return nil                      // →
             default: return event
@@ -81,7 +75,7 @@ struct SimpleDetailView: View {
     private func loadCapture() {
         previewImage = ImageStorageManager.shared.previewImage(for: viewModel.capture)
         notes = viewModel.capture.notes ?? ""
-        isEditingNotes = notes.isEmpty
+        isEditingNotes = false
         zoomScale = 1.0
         activeMagnification = 1.0
     }
@@ -133,67 +127,33 @@ struct SimpleDetailView: View {
     // MARK: - Image
 
     private var imageView: some View {
-        GeometryReader { proxy in
-            let viewportSize = proxy.size
-            let zoom = clampedZoom(zoomScale * activeMagnification)
-            let isZoomed = zoom > 1.01
-
-            Group {
-                if let img = previewImage {
-                    imageViewport(img, viewportSize: viewportSize, zoom: zoom, isZoomed: isZoomed)
-                } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .frame(width: viewportSize.width, height: viewportSize.height)
-            .background(.quaternary.opacity(0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        }
-        .frame(height: 380)
-    }
-
-    @ViewBuilder
-    private func imageViewport(_ img: NSImage, viewportSize: CGSize, zoom: CGFloat, isZoomed: Bool) -> some View {
         Group {
-            if isZoomed {
-                ScrollView([.vertical, .horizontal]) {
-                    zoomableImage(img, viewportSize: viewportSize, zoom: zoom)
-                }
-            } else {
+            if let img = previewImage {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: viewportSize.width, height: viewportSize.height)
+                    .scaleEffect(clampedZoom(zoomScale * activeMagnification), anchor: .center)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                activeMagnification = value
+                            }
+                            .onEnded { value in
+                                zoomScale = clampedZoom(zoomScale * value)
+                                activeMagnification = 1.0
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        zoomScale = zoomScale == 1.0 ? 2.0 : 1.0
+                    }
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+            } else {
+                RoundedRectangle(cornerRadius: 8).fill(.quaternary)
+                    .frame(height: 300).overlay(ProgressView())
             }
         }
-        .gesture(
-            MagnificationGesture()
-                .onChanged { value in
-                    activeMagnification = value
-                }
-                .onEnded { value in
-                    zoomScale = clampedZoom(zoomScale * value)
-                    activeMagnification = 1.0
-                }
-        )
-        .onTapGesture(count: 2) {
-            zoomScale = zoomScale == 1.0 ? 2.0 : 1.0
-        }
-    }
-
-    private func zoomableImage(_ img: NSImage, viewportSize: CGSize, zoom: CGFloat) -> some View {
-        Image(nsImage: img)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(width: viewportSize.width, height: viewportSize.height)
-            .scaleEffect(zoom, anchor: .center)
-            .frame(
-                width: viewportSize.width * zoom,
-                height: viewportSize.height * zoom
-            )
     }
 
     // MARK: - Gallery Bar
@@ -289,11 +249,7 @@ struct SimpleDetailView: View {
             HStack {
                 Text("Notes").font(.headline)
                 Spacer()
-                if isEditingNotes {
-                    Button("Done") { saveNotes() }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                }
+                if !notes.isEmpty { Button("Done") { isEditingNotes = false }.buttonStyle(.plain).font(.caption) }
             }
             if isEditingNotes || notes.isEmpty {
                 TextEditor(text: $notes).font(.body).frame(minHeight: 100)
@@ -327,14 +283,5 @@ struct SimpleDetailView: View {
 
     private func clampedZoom(_ value: CGFloat) -> CGFloat {
         min(max(value, 0.75), 4.0)
-    }
-
-    private func saveNotes() {
-        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
-            await viewModel.updateCurrentNotes(trimmed)
-            notes = viewModel.capture.notes ?? ""
-            isEditingNotes = false
-        }
     }
 }

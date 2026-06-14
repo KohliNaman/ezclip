@@ -93,7 +93,7 @@ private final class DetailWindowDelegate: NSObject, NSWindowDelegate, @unchecked
 /// owned by DetailWindow, not by SwiftUI's view graph.
 @MainActor
 final class DetailViewModel: ObservableObject {
-    @Published private(set) var captures: [Capture]
+    let captures: [Capture]
     @Published var currentIndex: Int
 
     init(captures: [Capture], startIndex: Int) {
@@ -119,20 +119,5 @@ final class DetailViewModel: ObservableObject {
     func goNext() {
         guard canGoNext else { return }
         currentIndex += 1
-    }
-
-    func updateCurrentNotes(_ notes: String) async {
-        guard currentIndex >= 0, currentIndex < captures.count else { return }
-
-        captures[currentIndex].notes = notes.isEmpty ? nil : notes
-        let updated = captures[currentIndex]
-
-        do {
-            try await DatabaseManager.shared.write { db in
-                try updated.update(db)
-            }
-        } catch {
-            print("Failed to update notes: \(error)")
-        }
     }
 }

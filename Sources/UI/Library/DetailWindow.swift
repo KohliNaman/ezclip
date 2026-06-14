@@ -93,12 +93,14 @@ private final class DetailWindowDelegate: NSObject, NSWindowDelegate, @unchecked
 /// owned by DetailWindow, not by SwiftUI's view graph.
 @MainActor
 final class DetailViewModel: ObservableObject {
-    let captures: [Capture]
+    @Published private(set) var captures: [Capture]
     @Published var currentIndex: Int
+    @Published var currentTags: [String] = []
 
     init(captures: [Capture], startIndex: Int) {
         self.captures = captures
         self.currentIndex = startIndex
+        Task { await loadCurrentTags() }
     }
 
     var capture: Capture {
@@ -114,10 +116,58 @@ final class DetailViewModel: ObservableObject {
     func goPrevious() {
         guard canGoPrevious else { return }
         currentIndex -= 1
+        Task { await loadCurrentTags() }
     }
 
     func goNext() {
         guard canGoNext else { return }
         currentIndex += 1
+        Task { await loadCurrentTags() }
+    }
+
+    func updateCurrentNotes(_ notes: String) async {
+        guard currentIndex >= 0, currentIndex < captures.count else { return }
+
+        captures[currentIndex].notes = notes.isEmpty ? nil : notes
+        let updated = captures[currentIndex]
+
+        do {
+            try await DatabaseManager.shared.write { db in
+                try updated.update(db)
+            }
+        } catch {
+            print("Failed to update notes: \(error)")
+        }
+    }
+
+    func loadCurrentTags() async {
+        guard currentIndex >= 0, currentIndex < captures.count else { return }
+        do {
+            currentTags = try await DatabaseManager.shared.tagNames(for: capture.id)
+        } catch {
+            print("Failed to load tags: \(error)")
+            currentTags = []
+        }
+    }
+
+    func addTag(_ name: String) async {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty, !currentTags.contains(normalized) else { return }
+        await setTags(currentTags + [normalized])
+    }
+
+    func removeTag(_ name: String) async {
+        await setTags(currentTags.filter { $0 != name })
+    }
+
+    private func setTags(_ tags: [String]) async {
+        guard currentIndex >= 0, currentIndex < captures.count else { return }
+        do {
+            try await DatabaseManager.shared.setTagNames(tags, for: capture.id)
+            await loadCurrentTags()
+            NotificationCenter.default.post(name: .captureTagsChanged, object: nil)
+        } catch {
+            print("Failed to update tags: \(error)")
+        }
     }
 }

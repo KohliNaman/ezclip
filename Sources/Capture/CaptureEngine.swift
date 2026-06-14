@@ -27,15 +27,21 @@ final class ScreenCaptureManager: NSObject {
             window.owningApplication?.bundleIdentifier == bundleId &&
             window.isOnScreen &&
             window.frame.width > 100 &&
-            window.frame.height > 100
+            window.frame.height > 100 &&
+            !window.looksLikeDesktopLayer(on: NSScreen.main)
         }
 
-        // Prefer the main window (largest on-screen area)
+        // Prefer titled app windows. Finder exposes the desktop as an on-screen
+        // window, so largest-window selection can otherwise capture icons only.
         let targetWindow: SCWindow
-        if candidateWindows.count == 1 {
-            targetWindow = candidateWindows[0]
+        if let titled = candidateWindows
+            .filter({ ($0.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false })
+            .max(by: { a, b in
+                a.capturePriority < b.capturePriority
+            }) {
+            targetWindow = titled
         } else if let main = candidateWindows.max(by: { a, b in
-            (a.frame.width * a.frame.height) < (b.frame.width * b.frame.height)
+            a.capturePriority < b.capturePriority
         }) {
             targetWindow = main
         } else {
@@ -95,5 +101,20 @@ enum CaptureError: LocalizedError {
         case .captureFailed: "Screen capture failed."
         case .permissionDenied: "Screen Recording permission is required.\nOpen System Settings → Privacy & Security → Screen Recording, enable ezclip."
         }
+    }
+}
+
+private extension SCWindow {
+    var capturePriority: CGFloat {
+        frame.width * frame.height
+    }
+
+    func looksLikeDesktopLayer(on screen: NSScreen?) -> Bool {
+        guard owningApplication?.bundleIdentifier == "com.apple.finder" else { return false }
+        let title = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard title.isEmpty else { return false }
+        guard let screen else { return true }
+        let screenFrame = screen.frame
+        return frame.width >= screenFrame.width * 0.92 && frame.height >= screenFrame.height * 0.82
     }
 }

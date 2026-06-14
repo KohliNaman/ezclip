@@ -12,6 +12,7 @@ struct SimpleDetailView: View {
 
     @State private var previewImage: NSImage?
     @State private var notes: String = ""
+    @State private var newTag: String = ""
     @State private var isEditingNotes = false
     @State private var eventMonitor: Any?
     @State private var zoomScale: CGFloat = 1.0
@@ -21,7 +22,7 @@ struct SimpleDetailView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            ScrollView([.vertical, .horizontal]) {
+            ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     imageView
 
@@ -33,6 +34,7 @@ struct SimpleDetailView: View {
                     if let designContext = BrowserDesignContextStore.decode(viewModel.capture.designContextJSON) {
                         designContextSection(designContext)
                     }
+                    tagsSection
                     notesSection
                     metadataSection
                 }
@@ -55,10 +57,21 @@ struct SimpleDetailView: View {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard !event.isARepeat else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if mods == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copyCurrentImage()
+                return nil
+            }
             guard !mods.contains(.command), !mods.contains(.option), !mods.contains(.control) else { return event }
 
             switch Int(event.keyCode) {
             case 53: onDismiss(); return nil                              // Esc
+            case 36, 76:
+                if isEditingNotes {
+                    saveNotes()
+                    return nil
+                }
+                return event                                               // Return / Enter
             case 123: viewModel.goPrevious(); return nil                  // ←
             case 124: viewModel.goNext(); return nil                      // →
             default: return event
@@ -75,9 +88,11 @@ struct SimpleDetailView: View {
     private func loadCapture() {
         previewImage = ImageStorageManager.shared.previewImage(for: viewModel.capture)
         notes = viewModel.capture.notes ?? ""
-        isEditingNotes = false
+        newTag = ""
+        isEditingNotes = notes.isEmpty
         zoomScale = 1.0
         activeMagnification = 1.0
+        Task { await viewModel.loadCurrentTags() }
     }
 
     // MARK: - Toolbar
@@ -108,10 +123,7 @@ struct SimpleDetailView: View {
                 }) { Label("Finder", systemImage: "folder") }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button(action: {
-                    if let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.writeObjects([img])
-                    }
+                    copyCurrentImage()
                 }) { Label("Copy Image", systemImage: "doc.on.doc") }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button { onDismiss() } label: {
@@ -127,33 +139,67 @@ struct SimpleDetailView: View {
     // MARK: - Image
 
     private var imageView: some View {
+        GeometryReader { proxy in
+            let viewportSize = proxy.size
+            let zoom = clampedZoom(zoomScale * activeMagnification)
+            let isZoomed = zoom > 1.01
+
+            Group {
+                if let img = previewImage {
+                    imageViewport(img, viewportSize: viewportSize, zoom: zoom, isZoomed: isZoomed)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(width: viewportSize.width, height: viewportSize.height)
+            .background(.quaternary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        }
+        .frame(height: 380)
+    }
+
+    @ViewBuilder
+    private func imageViewport(_ img: NSImage, viewportSize: CGSize, zoom: CGFloat, isZoomed: Bool) -> some View {
         Group {
-            if let img = previewImage {
+            if isZoomed {
+                ScrollView([.vertical, .horizontal]) {
+                    zoomableImage(img, viewportSize: viewportSize, zoom: zoom)
+                }
+            } else {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .scaleEffect(clampedZoom(zoomScale * activeMagnification), anchor: .center)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                activeMagnification = value
-                            }
-                            .onEnded { value in
-                                zoomScale = clampedZoom(zoomScale * value)
-                                activeMagnification = 1.0
-                            }
-                    )
-                    .onTapGesture(count: 2) {
-                        zoomScale = zoomScale == 1.0 ? 2.0 : 1.0
-                    }
-                    .cornerRadius(8)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-            } else {
-                RoundedRectangle(cornerRadius: 8).fill(.quaternary)
-                    .frame(height: 300).overlay(ProgressView())
+                    .frame(width: viewportSize.width, height: viewportSize.height)
             }
         }
+        .gesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    activeMagnification = value
+                }
+                .onEnded { value in
+                    zoomScale = clampedZoom(zoomScale * value)
+                    activeMagnification = 1.0
+                }
+        )
+        .onTapGesture(count: 2) {
+            zoomScale = zoomScale == 1.0 ? 2.0 : 1.0
+        }
+    }
+
+    private func zoomableImage(_ img: NSImage, viewportSize: CGSize, zoom: CGFloat) -> some View {
+        Image(nsImage: img)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: viewportSize.width, height: viewportSize.height)
+            .scaleEffect(zoom, anchor: .center)
+            .frame(
+                width: viewportSize.width * zoom,
+                height: viewportSize.height * zoom
+            )
     }
 
     // MARK: - Gallery Bar
@@ -242,6 +288,54 @@ struct SimpleDetailView: View {
         .cornerRadius(10)
     }
 
+    // MARK: - Tags
+
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Tags", systemImage: "tag")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if !viewModel.currentTags.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(viewModel.currentTags, id: \.self) { tag in
+                        HStack(spacing: 6) {
+                            Text(tag)
+                                .font(.caption)
+                                .lineLimit(1)
+                            Button {
+                                Task { await viewModel.removeTag(tag) }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption2.weight(.bold))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.quaternary.opacity(0.65))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Add tags like pricing page, landing page", text: $newTag)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addTagsFromField() }
+                Button("Add") { addTagsFromField() }
+                    .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.3))
+        .cornerRadius(10)
+    }
+
     // MARK: - Notes
 
     private var notesSection: some View {
@@ -249,7 +343,11 @@ struct SimpleDetailView: View {
             HStack {
                 Text("Notes").font(.headline)
                 Spacer()
-                if !notes.isEmpty { Button("Done") { isEditingNotes = false }.buttonStyle(.plain).font(.caption) }
+                if isEditingNotes {
+                    Button("Done") { saveNotes() }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                }
             }
             if isEditingNotes || notes.isEmpty {
                 TextEditor(text: $notes).font(.body).frame(minHeight: 100)
@@ -283,5 +381,33 @@ struct SimpleDetailView: View {
 
     private func clampedZoom(_ value: CGFloat) -> CGFloat {
         min(max(value, 0.75), 4.0)
+    }
+
+    private func saveNotes() {
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            await viewModel.updateCurrentNotes(trimmed)
+            notes = viewModel.capture.notes ?? ""
+            isEditingNotes = false
+        }
+    }
+
+    private func copyCurrentImage() {
+        guard let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) else { return }
+        ClipboardManager.shared.copyToClipboard(img)
+    }
+
+    private func addTagsFromField() {
+        let names = newTag
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !names.isEmpty else { return }
+        newTag = ""
+        Task {
+            for name in names {
+                await viewModel.addTag(name)
+            }
+        }
     }
 }

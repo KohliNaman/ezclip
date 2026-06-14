@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-struct Tag: Identifiable, Codable, @unchecked Sendable {
+struct Tag: Identifiable, Codable, Hashable, @unchecked Sendable {
     var id: UUID
     var name: String
     var usageCount: Int

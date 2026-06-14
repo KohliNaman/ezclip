@@ -100,11 +100,16 @@ function ezclipExtractDesignContext() {
     const style = window.getComputedStyle(source);
     const keep = [
       "display", "align-items", "justify-content", "gap", "padding", "border", "border-radius",
-      "background", "background-color", "color", "box-shadow", "font-family", "font-size",
+      "border-color", "border-style", "border-width", "background", "background-color", "background-image",
+      "color", "box-shadow", "font-family", "font-size",
       "font-weight", "line-height", "letter-spacing", "text-transform", "text-decoration",
-      "white-space", "min-width", "height", "text-align"
+      "white-space", "min-width", "height", "text-align", "outline"
     ];
     for (const prop of keep) clone.style.setProperty(prop, style.getPropertyValue(prop));
+    const transparent = style.backgroundColor === "rgba(0, 0, 0, 0)" || style.backgroundColor === "transparent";
+    if (transparent && !style.backgroundImage.includes("gradient")) {
+      clone.style.backgroundColor = "rgba(255,255,255,.92)";
+    }
     clone.style.margin = "0";
     clone.style.position = "relative";
     clone.style.boxSizing = "border-box";
@@ -117,25 +122,33 @@ function ezclipExtractDesignContext() {
     return clone.outerHTML;
   };
 
+  const buttonText = (el) => {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "input") return (el.value || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ");
+    return (el.innerText || el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ");
+  };
+
   const buttonCandidates = [
-    ...document.querySelectorAll("button,[role='button'],a[href]")
+    ...document.querySelectorAll("button,[role='button'],a[href],input[type='button'],input[type='submit']")
   ].filter((el) => {
     if (!visible(el)) return false;
     const rect = el.getBoundingClientRect();
-    const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
+    const text = buttonText(el);
     if (text.length < 2 || text.length > 48) return false;
     if (rect.width < 16 || rect.height < 24 || rect.width > 640 || rect.height > 220) return false;
     if (rect.height / rect.width > 1.4 || rect.width / rect.height > 10) return false;
     const style = window.getComputedStyle(el);
-    const hasButtonSignal = el.tagName.toLowerCase() === "button" || el.getAttribute("role") === "button" ||
-      style.backgroundColor !== "rgba(0, 0, 0, 0)" || parseFloat(style.borderTopWidth) > 0;
+    const tag = el.tagName.toLowerCase();
+    const hasButtonSignal = tag === "button" || tag === "input" || el.getAttribute("role") === "button" ||
+      style.backgroundColor !== "rgba(0, 0, 0, 0)" || style.backgroundImage !== "none" ||
+      parseFloat(style.borderTopWidth) > 0 || parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) > 16;
     return hasButtonSignal;
   });
 
   const buttons = [];
   const seenButtons = new Set();
   for (const el of buttonCandidates) {
-    const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
+    const text = buttonText(el);
     if (seenButtons.has(text.toLowerCase())) continue;
     seenButtons.add(text.toLowerCase());
     const rect = el.getBoundingClientRect();

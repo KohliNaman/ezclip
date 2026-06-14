@@ -119,14 +119,32 @@ jobs:
           echo "✅ latest.json updated:"
           cat latest.json
 
-      - name: Commit and push latest.json
+      - name: Bump version for next release
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist)
+
+          MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          NEXT_BUILD=$((CURRENT_BUILD + 1))
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEXT_VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEXT_BUILD" Resources/Info.plist
+
+          echo "✅ Bumped version: $CURRENT_VERSION (build $CURRENT_BUILD) -> $NEXT_VERSION (build $NEXT_BUILD)"
+
+      - name: Commit and push latest.json + version bump
         if: ${{ github.event_name == 'release' }}
         run: |
           git config user.name "ezclip-bot"
           git config user.email "bot@ezclip.app"
           git config credential.helper '!gh auth git-credential'
 
-          git add latest.json
+          git add latest.json Resources/Info.plist
           git commit -m "latest.json: ${{ github.event.release.tag_name }}" || echo "No changes"
           git push origin HEAD:main || echo "Push failed (branch protection?)"
         env:

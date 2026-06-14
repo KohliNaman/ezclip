@@ -17,8 +17,8 @@ final class ImageStorageManager: @unchecked Sendable {
         storageRoot = appSupport.appendingPathComponent("ezclip/Screenshots")
         try? FileManager.default.createDirectory(at: storageRoot, withIntermediateDirectories: true)
 
-        imageCache.countLimit = 160
-        imageCache.totalCostLimit = 96 * 1024 * 1024
+        imageCache.countLimit = 90
+        imageCache.totalCostLimit = 48 * 1024 * 1024
     }
 
     func screenshotDir(for date: Date = Date()) -> URL {
@@ -64,7 +64,7 @@ final class ImageStorageManager: @unchecked Sendable {
         return createThumbnail(from: full, maxDimension: 400)
     }
 
-    func previewImage(for capture: Capture, maxPixelSize: CGFloat = 1800) -> NSImage? {
+    func previewImage(for capture: Capture, maxPixelSize: CGFloat = 1400) -> NSImage? {
         cachedImage(path: capture.screenshotPath, maxPixelSize: maxPixelSize)
     }
 
@@ -77,6 +77,10 @@ final class ImageStorageManager: @unchecked Sendable {
     }
 
     private func cachedImage(path: String, maxPixelSize: CGFloat) -> NSImage? {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return nil
+        }
+
         let key = "\(path)#\(Int(maxPixelSize))" as NSString
         if let image = imageCache.object(forKey: key) {
             return image
@@ -96,19 +100,23 @@ final class ImageStorageManager: @unchecked Sendable {
     }
 
     func deleteImages(for capture: Capture) throws {
+        var firstError: Error?
         let full = capture.screenshotPath
         let thumb = capture.thumbnailPath
-        if FileManager.default.fileExists(atPath: full) {
-            try FileManager.default.removeItem(atPath: full)
+
+        for path in [full, thumb, capture.faviconPath, capture.albumArtPath].compactMap({ $0 }) {
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            do {
+                try FileManager.default.removeItem(atPath: path)
+            } catch {
+                firstError = firstError ?? error
+            }
         }
-        if FileManager.default.fileExists(atPath: thumb) {
-            try FileManager.default.removeItem(atPath: thumb)
-        }
-        if let fav = capture.faviconPath, FileManager.default.fileExists(atPath: fav) {
-            try FileManager.default.removeItem(atPath: fav)
-        }
-        if let art = capture.albumArtPath, FileManager.default.fileExists(atPath: art) {
-            try FileManager.default.removeItem(atPath: art)
+
+        clearDecodedImageCache()
+
+        if let firstError {
+            throw firstError
         }
     }
 

@@ -15,8 +15,6 @@ final class LibraryViewModel: ObservableObject {
     @Published var selectedCapture: Capture?
     @Published var sortOrder: SortOrder = .newest
     @Published var isLoading = false
-    @Published var isSelectionMode = false
-    @Published var selectedCaptureIDs: Set<UUID> = []
 
     private let db = DatabaseManager.shared
 
@@ -118,66 +116,37 @@ final class LibraryViewModel: ObservableObject {
 
     var totalCapturesCount: Int { captures.count }
 
-    var selectedCollection: Collection? {
-        guard let selectedCollectionId else { return nil }
-        return collections.first { $0.id == selectedCollectionId }
-    }
-
     func showAllCaptures() {
         selectedContextType = nil
         selectedCollectionId = nil
         selectedTagName = nil
-        clearSelection()
     }
 
     func selectContextType(_ type: ContextType) {
         selectedCollectionId = nil
         selectedTagName = nil
         selectedContextType = selectedContextType == type ? nil : type
-        clearSelection()
     }
 
     func selectCollection(_ collectionId: UUID?) {
         selectedContextType = nil
         selectedTagName = nil
         selectedCollectionId = collectionId
-        clearSelection()
     }
 
     func selectTag(_ tagName: String) {
         selectedContextType = nil
         selectedCollectionId = nil
         selectedTagName = selectedTagName == tagName ? nil : tagName
-        clearSelection()
     }
 
     func deleteCapture(_ capture: Capture) async {
         do {
-            captures.removeAll { $0.id == capture.id || $0.parentCaptureId == capture.id }
-            selectedCaptureIDs.remove(capture.id)
             try await CaptureOrchestrator.shared.delete(capture)
             await loadAll()
         } catch {
             print("Failed to delete: \(error)")
-            await loadAll()
         }
-    }
-
-    func deleteSelectedCaptures() async {
-        let selected = captures.filter { selectedCaptureIDs.contains($0.id) }
-        guard !selected.isEmpty else { return }
-        captures.removeAll { selectedCaptureIDs.contains($0.id) }
-        selectedCaptureIDs.removeAll()
-        isSelectionMode = false
-
-        for capture in selected {
-            do {
-                try await CaptureOrchestrator.shared.delete(capture)
-            } catch {
-                print("Failed to delete selected capture: \(error)")
-            }
-        }
-        await loadAll()
     }
 
     func updateNotes(_ notes: String, for capture: Capture) async {
@@ -213,9 +182,6 @@ final class LibraryViewModel: ObservableObject {
 
     func assignToCollection(_ captureId: UUID, collectionId: UUID?) async {
         do {
-            if let index = captures.firstIndex(where: { $0.id == captureId }) {
-                captures[index].collectionId = collectionId
-            }
             try await db.write { db in
                 if var capture = try Capture.fetchOne(db, key: captureId) {
                     capture.collectionId = collectionId
@@ -226,45 +192,6 @@ final class LibraryViewModel: ObservableObject {
         } catch {
             print("Failed to assign collection: \(error)")
         }
-    }
-
-    func assignSelectedCaptures(to collectionId: UUID?) async {
-        let ids = selectedCaptureIDs
-        guard !ids.isEmpty else { return }
-
-        for index in captures.indices where ids.contains(captures[index].id) {
-            captures[index].collectionId = collectionId
-        }
-        selectedCaptureIDs.removeAll()
-        isSelectionMode = false
-
-        do {
-            try await db.write { db in
-                for id in ids {
-                    if var capture = try Capture.fetchOne(db, key: id) {
-                        capture.collectionId = collectionId
-                        try capture.update(db)
-                    }
-                }
-            }
-            await loadAll()
-        } catch {
-            print("Failed to assign selected captures: \(error)")
-            await loadAll()
-        }
-    }
-
-    func toggleSelection(for capture: Capture) {
-        if selectedCaptureIDs.contains(capture.id) {
-            selectedCaptureIDs.remove(capture.id)
-        } else {
-            selectedCaptureIDs.insert(capture.id)
-        }
-    }
-
-    func clearSelection() {
-        selectedCaptureIDs.removeAll()
-        isSelectionMode = false
     }
 }
 

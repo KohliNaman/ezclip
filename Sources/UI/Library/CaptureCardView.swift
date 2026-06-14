@@ -1,19 +1,8 @@
 import SwiftUI
 
-private final class ThumbnailLoadResult: @unchecked Sendable {
-    let image: NSImage?
-
-    init(image: NSImage?) {
-        self.image = image
-    }
-}
-
 struct CaptureCardView: View {
     let capture: Capture
-    var isSelected: Bool = false
-    var showsSelection: Bool = false
     @State private var thumbnail: NSImage?
-    @State private var didFinishLoading = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,18 +12,6 @@ struct CaptureCardView: View {
                     Image(nsImage: thumb)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                } else if didFinishLoading {
-                    Rectangle()
-                        .fill(.quaternary)
-                        .overlay {
-                            VStack(spacing: 6) {
-                                Image(systemName: "photo.badge.exclamationmark")
-                                    .font(.system(size: 22))
-                                Text("Missing File")
-                                    .font(.caption2)
-                            }
-                            .foregroundStyle(.secondary)
-                        }
                 } else {
                     Rectangle()
                         .fill(.quaternary)
@@ -60,20 +37,6 @@ struct CaptureCardView: View {
                             .background(.ultraThinMaterial)
                             .cornerRadius(4)
                             .padding(4)
-                        }
-                        Spacer()
-                    }
-                }
-
-                if showsSelection {
-                    VStack {
-                        HStack {
-                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 20, weight: .semibold))
-                                .symbolRenderingMode(.palette)
-                                .foregroundStyle(isSelected ? Color.white : Color.secondary, isSelected ? Color.accentColor : Color.clear)
-                                .padding(6)
-                            Spacer()
                         }
                         Spacer()
                     }
@@ -116,22 +79,19 @@ struct CaptureCardView: View {
         .cornerRadius(10)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 0.5)
+                .stroke(.quaternary, lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
         .task(id: capture.id) {
             thumbnail = nil
-            didFinishLoading = false
-            let result = await Task.detached(priority: .utility) {
-                ThumbnailLoadResult(image: ImageStorageManager.shared.thumbnailImage(for: capture))
+            let loaded = await Task.detached(priority: .utility) {
+                ImageStorageManager.shared.thumbnailImage(for: capture)
             }.value
             guard !Task.isCancelled else { return }
-            thumbnail = result.image
-            didFinishLoading = true
+            thumbnail = loaded
         }
         .onDisappear {
             thumbnail = nil
-            didFinishLoading = false
         }
     }
 }

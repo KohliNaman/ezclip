@@ -21,7 +21,7 @@ struct SimpleDetailView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            ScrollView([.vertical, .horizontal]) {
+            ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     imageView
 
@@ -127,12 +127,23 @@ struct SimpleDetailView: View {
     // MARK: - Image
 
     private var imageView: some View {
-        Group {
-            if let img = previewImage {
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .scaleEffect(clampedZoom(zoomScale * activeMagnification), anchor: .center)
+        GeometryReader { proxy in
+            let viewportSize = proxy.size
+            let zoom = clampedZoom(zoomScale * activeMagnification)
+
+            Group {
+                if let img = previewImage {
+                    ScrollView([.vertical, .horizontal]) {
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: viewportSize.width, height: viewportSize.height)
+                            .scaleEffect(zoom, anchor: .center)
+                            .frame(
+                                width: viewportSize.width * zoom,
+                                height: viewportSize.height * zoom
+                            )
+                    }
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
@@ -146,14 +157,18 @@ struct SimpleDetailView: View {
                     .onTapGesture(count: 2) {
                         zoomScale = zoomScale == 1.0 ? 2.0 : 1.0
                     }
-                    .cornerRadius(8)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-            } else {
-                RoundedRectangle(cornerRadius: 8).fill(.quaternary)
-                    .frame(height: 300).overlay(ProgressView())
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            .frame(width: viewportSize.width, height: viewportSize.height)
+            .background(.quaternary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
         }
+        .frame(height: 380)
     }
 
     // MARK: - Gallery Bar

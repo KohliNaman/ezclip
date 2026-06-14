@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import GRDB
+import AppKit
 
 @MainActor
 final class LibraryViewModel: ObservableObject {
@@ -17,6 +18,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isSelectionMode = false
     @Published var selectedCaptureIDs: Set<UUID> = []
+    @Published var lastSelectedCaptureID: UUID?
 
     private let db = DatabaseManager.shared
 
@@ -91,8 +93,8 @@ final class LibraryViewModel: ObservableObject {
             }
         }
 
-        if !searchText.isEmpty {
-            let query = searchText.lowercased()
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !query.isEmpty {
             results = results.filter { capture in
                 capture.appName.localizedCaseInsensitiveContains(query) ||
                 capture.windowTitle.localizedCaseInsensitiveContains(query) ||
@@ -100,7 +102,9 @@ final class LibraryViewModel: ObservableObject {
                 (capture.pageTitle?.localizedCaseInsensitiveContains(query) ?? false) ||
                 (capture.songName?.localizedCaseInsensitiveContains(query) ?? false) ||
                 (capture.artistName?.localizedCaseInsensitiveContains(query) ?? false) ||
-                (capture.designFileName?.localizedCaseInsensitiveContains(query) ?? false)
+                (capture.designFileName?.localizedCaseInsensitiveContains(query) ?? false) ||
+                (capture.notes?.localizedCaseInsensitiveContains(query) ?? false) ||
+                designContextMatches(capture.designContextJSON, query: query)
             }
         }
 
@@ -168,6 +172,7 @@ final class LibraryViewModel: ObservableObject {
         guard !selected.isEmpty else { return }
         captures.removeAll { selectedCaptureIDs.contains($0.id) }
         selectedCaptureIDs.removeAll()
+        lastSelectedCaptureID = nil
         isSelectionMode = false
 
         for capture in selected {
@@ -236,6 +241,7 @@ final class LibraryViewModel: ObservableObject {
             captures[index].collectionId = collectionId
         }
         selectedCaptureIDs.removeAll()
+        lastSelectedCaptureID = nil
         isSelectionMode = false
 
         do {
@@ -254,17 +260,68 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func toggleSelection(for capture: Capture) {
+    func toggleSelection(for capture: Capture, in visibleCaptures: [Capture]? = nil, extendRange: Bool = false) {
+        if extendRange,
+           let visibleCaptures,
+           let lastSelectedCaptureID,
+           let anchor = visibleCaptures.firstIndex(where: { $0.id == lastSelectedCaptureID }),
+           let target = visibleCaptures.firstIndex(where: { $0.id == capture.id }) {
+            let range = min(anchor, target)...max(anchor, target)
+            for index in range {
+                selectedCaptureIDs.insert(visibleCaptures[index].id)
+            }
+            return
+        }
+
         if selectedCaptureIDs.contains(capture.id) {
             selectedCaptureIDs.remove(capture.id)
         } else {
             selectedCaptureIDs.insert(capture.id)
         }
+        lastSelectedCaptureID = capture.id
     }
 
     func clearSelection() {
         selectedCaptureIDs.removeAll()
+        lastSelectedCaptureID = nil
         isSelectionMode = false
+    }
+
+    func copySelectedImagesToClipboard() {
+        let images = captures
+            .filter { selectedCaptureIDs.contains($0.id) }
+            .compactMap { ImageStorageManager.shared.fullImage(for: $0) }
+        guard !images.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects(images)
+    }
+
+    private func designContextMatches(_ json: String?, query: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        if json?.localizedCaseInsensitiveContains(query) == true {
+            return true
+        }
+        guard let context = BrowserDesignContextStore.decode(json) else { return false }
+        return context.fonts.contains { font in
+            font.fontFamily.localizedCaseInsensitiveContains(query) ||
+            font.fontSize.localizedCaseInsensitiveContains(query) ||
+            font.fontWeight.localizedCaseInsensitiveContains(query) ||
+            font.sampleText.localizedCaseInsensitiveContains(query)
+        } ||
+        context.colors.contains { color in
+            color.role.localizedCaseInsensitiveContains(query) ||
+            color.value.localizedCaseInsensitiveContains(query) ||
+            color.value.cssHexOrOriginalForSearch.localizedCaseInsensitiveContains(query)
+        } ||
+        context.cssTokens.contains { token in
+            token.name.localizedCaseInsensitiveContains(query) ||
+            token.value.localizedCaseInsensitiveContains(query)
+        } ||
+        context.buttons.contains { button in
+            button.text.localizedCaseInsensitiveContains(query) ||
+            (button.backgroundColor?.localizedCaseInsensitiveContains(query) ?? false) ||
+            (button.color?.localizedCaseInsensitiveContains(query) ?? false)
+        }
     }
 }
 
@@ -277,5 +334,20 @@ private extension LibraryViewModel.SortOrder {
         case .oldest: "timestamp ASC"
         case .appName: "appName ASC"
         }
+    }
+}
+
+private extension String {
+    var cssHexOrOriginalForSearch: String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let range = trimmed.range(of: #"rgba?\(([^\)]+)\)"#, options: .regularExpression) else {
+            return self
+        }
+        let body = trimmed[range].drop { $0 != "(" }.dropFirst().dropLast()
+        let parts = body.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 3 else { return self }
+        return "#" + parts.prefix(3)
+            .map { String(format: "%02x", Int(max(0, min(255, $0)))) }
+            .joined()
     }
 }

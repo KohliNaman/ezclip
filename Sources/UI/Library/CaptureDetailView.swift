@@ -55,6 +55,11 @@ struct SimpleDetailView: View {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard !event.isARepeat else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if mods == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copyCurrentImage()
+                return nil
+            }
             guard !mods.contains(.command), !mods.contains(.option), !mods.contains(.control) else { return event }
 
             switch Int(event.keyCode) {
@@ -114,10 +119,7 @@ struct SimpleDetailView: View {
                 }) { Label("Finder", systemImage: "folder") }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button(action: {
-                    if let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.writeObjects([img])
-                    }
+                    copyCurrentImage()
                 }) { Label("Copy Image", systemImage: "doc.on.doc") }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button { onDismiss() } label: {
@@ -336,5 +338,10 @@ struct SimpleDetailView: View {
             notes = viewModel.capture.notes ?? ""
             isEditingNotes = false
         }
+    }
+
+    private func copyCurrentImage() {
+        guard let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) else { return }
+        ClipboardManager.shared.copyToClipboard(img)
     }
 }

@@ -3,26 +3,28 @@ import WebKit
 
 struct DesignContextView: View {
     let context: BrowserDesignContext
+    @State private var expandedFontFamilies: Set<String> = []
+    @State private var cssTokensExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if !context.fonts.isEmpty {
                 section("Fonts") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(context.fonts.prefix(8)) { font in
-                            VStack(alignment: .leading, spacing: 3) {
-                                FontPreview(font: font, fontFaceCSS: context.fontFaceCSS)
-                                    .frame(height: previewHeight(for: font))
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                Text("\(font.fontFamily) · \(font.fontSize) · \(font.fontWeight) · \(font.count)x")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                copy(fontClipboardValue(font))
-                            }
-                            .help("Copy font")
+                    LazyVGrid(columns: fontColumns, alignment: .leading, spacing: 12) {
+                        ForEach(groupedFonts.prefix(8)) { group in
+                            FontFamilyCard(
+                                group: group,
+                                isExpanded: expandedFontFamilies.contains(group.id),
+                                fontFaceCSS: context.fontFaceCSS,
+                                toggle: {
+                                    if expandedFontFamilies.contains(group.id) {
+                                        expandedFontFamilies.remove(group.id)
+                                    } else {
+                                        expandedFontFamilies.insert(group.id)
+                                    }
+                                },
+                                copy: copy
+                            )
                         }
                     }
                 }
@@ -30,18 +32,29 @@ struct DesignContextView: View {
 
             if !context.colors.isEmpty {
                 section("Colors") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
-                        ForEach(context.colors.prefix(16)) { color in
-                            HStack(spacing: 7) {
-                                RoundedRectangle(cornerRadius: 4)
+                    LazyVGrid(columns: colorColumns, spacing: 10) {
+                        ForEach(context.colors.prefix(18)) { color in
+                            HStack(spacing: 9) {
+                                RoundedRectangle(cornerRadius: 5)
                                     .fill(Color(cssColor: color.value))
-                                    .frame(width: 22, height: 22)
-                                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(color.role).font(.caption2).foregroundStyle(.secondary)
-                                    Text(color.displayValue).font(.caption2).lineLimit(1)
+                                    .frame(width: 28, height: 28)
+                                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(.white.opacity(0.14)))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(color.role)
+                                        .font(.caption2)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Text(color.displayValue)
+                                        .font(.caption.monospaced())
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
                                 }
+                                Spacer(minLength: 0)
                             }
+                            .padding(8)
+                            .background(.black.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 copy(color.displayValue)
@@ -53,18 +66,24 @@ struct DesignContextView: View {
             }
 
             if !context.cssTokens.isEmpty {
-                section("CSS Tokens") {
-                    VStack(alignment: .leading, spacing: 5) {
-                        ForEach(context.cssTokens.prefix(24)) { token in
-                            HStack(alignment: .top, spacing: 8) {
+                DisclosureGroup(isExpanded: $cssTokensExpanded) {
+                    LazyVGrid(columns: cssColumns, alignment: .leading, spacing: 8) {
+                        ForEach(context.cssTokens.prefix(80)) { token in
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(token.name)
                                     .font(.caption.monospaced())
                                     .foregroundStyle(.secondary)
-                                    .frame(width: 150, alignment: .leading)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(token.value)
                                     .font(.caption.monospaced())
                                     .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.black.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 copy("\(token.name): \(token.value)")
@@ -72,18 +91,33 @@ struct DesignContextView: View {
                             .help("Copy CSS token")
                         }
                     }
+                    .padding(.top, 8)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("CSS Tokens")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Text("\(context.cssTokens.count)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .foregroundStyle(.secondary)
             }
 
             if !context.buttons.isEmpty {
                 section("Buttons") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+                    LazyVGrid(columns: buttonColumns, spacing: 12) {
                         ForEach(context.buttons.prefix(12)) { button in
                             VStack(alignment: .leading, spacing: 6) {
-                                ButtonPreview(html: button.html)
-                                    .frame(height: max(58, min(88, button.height + 28)))
+                                ButtonPreview(
+                                    html: button.html,
+                                    backgroundColor: button.backgroundColor,
+                                    textColor: button.color
+                                )
+                                    .frame(height: max(86, min(120, button.height + 42)))
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.12)))
                                     .overlay(
                                         Color.clear
                                             .contentShape(Rectangle())
@@ -96,6 +130,7 @@ struct DesignContextView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
+                                    .truncationMode(.tail)
                                     .onTapGesture {
                                         copy(button.text)
                                     }
@@ -106,6 +141,37 @@ struct DesignContextView: View {
                 }
             }
         }
+    }
+
+    private var groupedFonts: [FontFamilyGroup] {
+        Dictionary(grouping: context.fonts) { normalizedFamily($0.fontFamily) }
+            .map { key, fonts in
+                FontFamilyGroup(
+                    id: key,
+                    displayName: fonts.first?.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? key,
+                    fonts: fonts.sorted { lhs, rhs in
+                        if lhs.count != rhs.count { return lhs.count > rhs.count }
+                        return fontSizeValue(lhs.fontSize) > fontSizeValue(rhs.fontSize)
+                    }
+                )
+            }
+            .sorted { lhs, rhs in lhs.totalCount > rhs.totalCount }
+    }
+
+    private var fontColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 260, maximum: 420), spacing: 12)]
+    }
+
+    private var colorColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 150, maximum: 230), spacing: 10)]
+    }
+
+    private var cssColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 220, maximum: 360), spacing: 8)]
+    }
+
+    private var buttonColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 230, maximum: 360), spacing: 12)]
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -123,20 +189,94 @@ struct DesignContextView: View {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
+}
+
+private struct FontFamilyGroup: Identifiable {
+    let id: String
+    let displayName: String
+    let fonts: [BrowserDesignContext.FontInfo]
+
+    var totalCount: Int { fonts.reduce(0) { $0 + $1.count } }
+    var primaryFont: BrowserDesignContext.FontInfo { fonts[0] }
+    var detailText: String {
+        let sizes = Array(Set(fonts.map(\.fontSize))).sorted { fontSizeValue($0) < fontSizeValue($1) }
+        let weights = Array(Set(fonts.map(\.fontWeight))).sorted()
+        return "\(sizes.joined(separator: ", ")) · \(weights.joined(separator: "/")) · \(totalCount)x"
+    }
+}
+
+private struct FontFamilyCard: View {
+    let group: FontFamilyGroup
+    let isExpanded: Bool
+    let fontFaceCSS: String?
+    let toggle: () -> Void
+    let copy: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(group.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                Button(action: toggle) {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Hide variants" : "Show variants")
+            }
+
+            FontPreview(font: group.primaryFont, fontFaceCSS: fontFaceCSS)
+                .frame(height: 92)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+
+            Text(group.detailText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(group.fonts.prefix(10)) { font in
+                        HStack {
+                            Text("\(font.fontSize) · \(font.fontWeight)")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(font.count)x")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { copy(fontClipboardValue(font)) }
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.black.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        .onTapGesture { copy(fontClipboardValue(group.primaryFont)) }
+        .help("Copy font and Google Fonts link")
+    }
+
     private func fontClipboardValue(_ font: BrowserDesignContext.FontInfo) -> String {
         let family = font.fontFamily.trimmingCharacters(in: .whitespacesAndNewlines)
         let googleFamily = family.replacingOccurrences(of: " ", with: "+")
         return "\(family)\nhttps://fonts.google.com/specimen/\(googleFamily)"
     }
-
-    private func previewHeight(for font: BrowserDesignContext.FontInfo) -> CGFloat {
-        let size = Double(font.fontSize.replacingOccurrences(of: "px", with: "")) ?? 18
-        return CGFloat(max(34, min(72, size * 1.32)))
-    }
 }
 
 private struct ButtonPreview: NSViewRepresentable {
     let html: String
+    let backgroundColor: String?
+    let textColor: String?
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -147,6 +287,8 @@ private struct ButtonPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
+        let fallbackBackground = (backgroundColor?.isTransparentCSS == false ? backgroundColor : nil) ?? "rgba(255,255,255,.92)"
+        let fallbackColor = (textColor?.isTransparentCSS == false ? textColor : nil) ?? "#151515"
         let document = """
         <!doctype html>
         <html>
@@ -154,9 +296,10 @@ private struct ButtonPreview: NSViewRepresentable {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
-            body{display:flex;align-items:center;justify-content:center;padding:10px;box-sizing:border-box}
-            body>*{max-width:100%;box-sizing:border-box;transform:none!important}
-            button,a{vertical-align:middle;text-decoration:none}
+            body{display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}
+            body>*{max-width:100%;min-width:min(78%,280px);min-height:38px;box-sizing:border-box;transform:none!important;animation:none!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;overflow:hidden!important}
+            button,a{vertical-align:middle;text-decoration:none;white-space:normal!important;overflow-wrap:anywhere!important}
+            body>button,body>a,body>[role=button]{background:\(fallbackBackground)!important;color:\(fallbackColor)!important}
           </style>
         </head>
         <body>\(html)</body>
@@ -192,8 +335,8 @@ private struct FontPreview: NSViewRepresentable {
           <style>
             \(css)
             html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;color-scheme:dark}
-            body{display:flex;align-items:center;box-sizing:border-box;padding:2px 0 4px}
-            .sample{font-family:"\(family)", -apple-system, BlinkMacSystemFont, sans-serif;font-size:\(size);font-weight:\(weight);line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.92);-webkit-font-smoothing:antialiased}
+            body{display:flex;align-items:center;box-sizing:border-box;padding:4px 0}
+            .sample{font-family:"\(family)", -apple-system, BlinkMacSystemFont, sans-serif;font-size:clamp(18px,\(size),56px);font-weight:\(weight);line-height:1.12;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:rgba(255,255,255,.94);-webkit-font-smoothing:antialiased}
           </style>
         </head>
         <body><div class="sample">\(sample)</div></body>
@@ -243,6 +386,27 @@ private extension String {
             .map { String(format: "%02x", Int(max(0, min(255, $0)))) }
             .joined()
     }
+
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+
+    var isTransparentCSS: Bool {
+        let lower = trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lower.isEmpty || lower == "transparent" || lower == "rgba(0, 0, 0, 0)" || lower == "#00000000"
+    }
+}
+
+private func normalizedFamily(_ family: String) -> String {
+    family
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\"", with: "")
+        .replacingOccurrences(of: "'", with: "")
+        .lowercased()
+}
+
+private func fontSizeValue(_ size: String) -> Double {
+    Double(size.replacingOccurrences(of: "px", with: "")) ?? 0
 }
 
 private extension Color {

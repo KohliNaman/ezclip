@@ -4,6 +4,7 @@ struct LibraryView: View {
     @EnvironmentObject var viewModel: LibraryViewModel
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showingSettings = false
+    @State private var keyMonitor: Any?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -23,9 +24,10 @@ struct LibraryView: View {
                 } else if viewModel.filteredCaptures.isEmpty {
                     emptyState
                 } else {
+                    let visibleCaptures = viewModel.filteredCaptures
                     ScrollView {
                         LazyVGrid(columns: gridColumns, spacing: 12) {
-                            ForEach(viewModel.filteredCaptures) { capture in
+                            ForEach(visibleCaptures) { capture in
                                 CaptureCardView(
                                     capture: capture,
                                     isSelected: viewModel.selectedCaptureIDs.contains(capture.id),
@@ -33,7 +35,11 @@ struct LibraryView: View {
                                 )
                                     .onTapGesture {
                                         if viewModel.isSelectionMode {
-                                            viewModel.toggleSelection(for: capture)
+                                            viewModel.toggleSelection(
+                                                for: capture,
+                                                in: visibleCaptures,
+                                                extendRange: NSEvent.modifierFlags.contains(.shift)
+                                            )
                                         } else {
                                             openDetail(for: capture)
                                         }
@@ -143,10 +149,14 @@ struct LibraryView: View {
         }
         .onAppear {
             guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+            installKeyMonitor()
             // Register global hotkey
             _ = HotkeyManager.shared.register {
                 Task { await CaptureOrchestrator.shared.capture() }
             }
+        }
+        .onDisappear {
+            removeKeyMonitor()
         }
     }
 
@@ -252,6 +262,29 @@ struct LibraryView: View {
             return false
         }
         return ["com.apple.Safari", "com.google.Chrome", "app.zen-browser.zen"].contains(bundleId)
+    }
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard !event.isARepeat else { return event }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard mods == .command,
+                  event.charactersIgnoringModifiers?.lowercased() == "c",
+                  viewModel.isSelectionMode,
+                  !viewModel.selectedCaptureIDs.isEmpty else {
+                return event
+            }
+            viewModel.copySelectedImagesToClipboard()
+            return nil
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
     }
 }
 

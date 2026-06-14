@@ -1,6 +1,6 @@
 {
-  "version": "0.3.0-beta",
-  "build": "1",
-  "url": "https://github.com/KohliNaman/ezclip/releases/download/v0.3.0-beta/ezclip-0.3.0-beta-arm64.dmg",
-  "notes": "Zen Browser resolver, simple updater, capture animation."
+  "version": "0.4.5",
+  "build": "5",
+  "url": "https://github.com/KohliNaman/ezclip/releases/download/v0.4.5/ezclip-0.4.5-arm64.dmg",
+  "notes": "Update available. See GitHub Releases for details."
 }

@@ -1,5 +1,13 @@
 import SwiftUI
 
+private final class ThumbnailLoadResult: @unchecked Sendable {
+    let image: NSImage?
+
+    init(image: NSImage?) {
+        self.image = image
+    }
+}
+
 struct CaptureCardView: View {
     let capture: Capture
     var isSelected: Bool = false
@@ -114,11 +122,11 @@ struct CaptureCardView: View {
         .task(id: capture.id) {
             thumbnail = nil
             didFinishLoading = false
-            let loaded = await Task.detached(priority: .utility) {
-                ImageStorageManager.shared.thumbnailImage(for: capture)
+            let result = await Task.detached(priority: .utility) {
+                ThumbnailLoadResult(image: ImageStorageManager.shared.thumbnailImage(for: capture))
             }.value
             guard !Task.isCancelled else { return }
-            thumbnail = loaded
+            thumbnail = result.image
             didFinishLoading = true
         }
         .onDisappear {

@@ -69,15 +69,6 @@ struct LibraryView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        toggleSidebar()
-                    } label: {
-                        Image(systemName: "sidebar.leading")
-                    }
-                    .help("Show or hide sidebar")
-                }
-
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 8) {
                         // Scrolling capture button (only for browsers)
@@ -253,12 +244,6 @@ struct LibraryView: View {
                     Task { await viewModel.assignToCollection(capture.id, collectionId: nil) }
                 }
             }
-        }
-    }
-
-    private func toggleSidebar() {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
     }
 

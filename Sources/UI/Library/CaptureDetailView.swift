@@ -12,6 +12,7 @@ struct SimpleDetailView: View {
 
     @State private var previewImage: NSImage?
     @State private var notes: String = ""
+    @State private var newTag: String = ""
     @State private var isEditingNotes = false
     @State private var eventMonitor: Any?
     @State private var zoomScale: CGFloat = 1.0
@@ -33,6 +34,7 @@ struct SimpleDetailView: View {
                     if let designContext = BrowserDesignContextStore.decode(viewModel.capture.designContextJSON) {
                         designContextSection(designContext)
                     }
+                    tagsSection
                     notesSection
                     metadataSection
                 }
@@ -86,9 +88,11 @@ struct SimpleDetailView: View {
     private func loadCapture() {
         previewImage = ImageStorageManager.shared.previewImage(for: viewModel.capture)
         notes = viewModel.capture.notes ?? ""
+        newTag = ""
         isEditingNotes = notes.isEmpty
         zoomScale = 1.0
         activeMagnification = 1.0
+        Task { await viewModel.loadCurrentTags() }
     }
 
     // MARK: - Toolbar
@@ -284,6 +288,54 @@ struct SimpleDetailView: View {
         .cornerRadius(10)
     }
 
+    // MARK: - Tags
+
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Tags", systemImage: "tag")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if !viewModel.currentTags.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(viewModel.currentTags, id: \.self) { tag in
+                        HStack(spacing: 6) {
+                            Text(tag)
+                                .font(.caption)
+                                .lineLimit(1)
+                            Button {
+                                Task { await viewModel.removeTag(tag) }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption2.weight(.bold))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.quaternary.opacity(0.65))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Add tags like pricing page, landing page", text: $newTag)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addTagsFromField() }
+                Button("Add") { addTagsFromField() }
+                    .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.3))
+        .cornerRadius(10)
+    }
+
     // MARK: - Notes
 
     private var notesSection: some View {
@@ -343,5 +395,19 @@ struct SimpleDetailView: View {
     private func copyCurrentImage() {
         guard let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) else { return }
         ClipboardManager.shared.copyToClipboard(img)
+    }
+
+    private func addTagsFromField() {
+        let names = newTag
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !names.isEmpty else { return }
+        newTag = ""
+        Task {
+            for name in names {
+                await viewModel.addTag(name)
+            }
+        }
     }
 }

@@ -155,6 +155,38 @@ final class LibraryViewModel: ObservableObject {
         clearSelection()
     }
 
+    func renameTag(_ tag: Tag, to name: String) async {
+        do {
+            try await db.renameTag(id: tag.id, to: name)
+            if selectedTagName == tag.name {
+                selectedTagName = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            await loadAll()
+        } catch {
+            print("Failed to rename tag: \(error)")
+        }
+    }
+
+    func deleteTag(_ tag: Tag) async {
+        do {
+            try await db.deleteTag(id: tag.id)
+            if selectedTagName == tag.name { selectedTagName = nil }
+            await loadAll()
+        } catch {
+            print("Failed to delete tag: \(error)")
+        }
+    }
+
+    func mergeTag(_ source: Tag, into destination: Tag) async {
+        do {
+            try await db.mergeTag(sourceId: source.id, into: destination.id)
+            if selectedTagName == source.name { selectedTagName = destination.name }
+            await loadAll()
+        } catch {
+            print("Failed to merge tag: \(error)")
+        }
+    }
+
     func deleteCapture(_ capture: Capture) async {
         do {
             captures.removeAll { $0.id == capture.id || $0.parentCaptureId == capture.id }

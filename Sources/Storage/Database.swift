@@ -121,15 +121,13 @@ final class DatabaseManager {
         try await write { db in
             var tags: [Tag] = []
             for name in names {
-                let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
+                let trimmed = Self.normalizedTagName(name)
                 guard !trimmed.isEmpty else { continue }
 
-                if var existing = try Tag.filter(Tag.Columns.name == trimmed).fetchOne(db) {
-                    existing.usageCount += 1
-                    try existing.update(db)
+                if let existing = try Tag.filter(Tag.Columns.name == trimmed).fetchOne(db) {
                     tags.append(existing)
                 } else {
-                    var tag = Tag(id: UUID(), name: trimmed, usageCount: 1)
+                    var tag = Tag(id: UUID(), name: trimmed, usageCount: 0)
                     try tag.insert(db)
                     tags.append(tag)
                 }
@@ -141,10 +139,130 @@ final class DatabaseManager {
     func linkTags(_ tagIds: [UUID], to captureId: UUID) async throws {
         try await write { db in
             for tagId in tagIds {
-                var ct = CaptureTag(captureId: captureId, tagId: tagId)
-                try ct.insert(db)
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
+                    arguments: [captureId.uuidString, tagId.uuidString]
+                )
             }
+            try Self.recalculateTagUsageCounts(db)
         }
+    }
+
+    func tagNames(for captureId: UUID) async throws -> [String] {
+        try await read { db in
+            try String.fetchAll(
+                db,
+                sql: """
+                SELECT tag.name
+                FROM tag
+                JOIN captureTag ON captureTag.tagId = tag.id
+                WHERE captureTag.captureId = ?
+                ORDER BY tag.name COLLATE NOCASE
+                """,
+                arguments: [captureId.uuidString]
+            )
+        }
+    }
+
+    func setTagNames(_ names: [String], for captureId: UUID) async throws {
+        try await write { db in
+            let normalizedNames = Array(Set(names.map(Self.normalizedTagName).filter { !$0.isEmpty })).sorted()
+            try CaptureTag
+                .filter(Column("captureId") == captureId.uuidString)
+                .deleteAll(db)
+
+            for name in normalizedNames {
+                let tag: Tag
+                if let existing = try Tag.filter(Tag.Columns.name == name).fetchOne(db) {
+                    tag = existing
+                } else {
+                    var created = Tag(id: UUID(), name: name, usageCount: 0)
+                    try created.insert(db)
+                    tag = created
+                }
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
+                    arguments: [captureId.uuidString, tag.id.uuidString]
+                )
+            }
+            try Self.recalculateTagUsageCounts(db)
+            try Self.deleteUnusedTags(db)
+        }
+    }
+
+    func renameTag(id: UUID, to newName: String) async throws {
+        try await write { db in
+            let normalized = Self.normalizedTagName(newName)
+            guard !normalized.isEmpty,
+                  let tag = try Tag.fetchOne(db, key: id) else { return }
+
+            if let existing = try Tag.filter(Tag.Columns.name == normalized).fetchOne(db),
+               existing.id != id {
+                try Self.mergeTag(db, sourceId: tag.id, destinationId: existing.id)
+            } else {
+                var updated = tag
+                updated.name = normalized
+                try updated.update(db)
+            }
+            try Self.recalculateTagUsageCounts(db)
+            try Self.deleteUnusedTags(db)
+        }
+    }
+
+    func deleteTag(id: UUID) async throws {
+        try await write { db in
+            try CaptureTag
+                .filter(Column("tagId") == id.uuidString)
+                .deleteAll(db)
+            try Tag.deleteOne(db, key: id)
+            try Self.recalculateTagUsageCounts(db)
+        }
+    }
+
+    func mergeTag(sourceId: UUID, into destinationId: UUID) async throws {
+        try await write { db in
+            try Self.mergeTag(db, sourceId: sourceId, destinationId: destinationId)
+            try Self.recalculateTagUsageCounts(db)
+            try Self.deleteUnusedTags(db)
+        }
+    }
+
+    private static func normalizedTagName(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func mergeTag(_ db: Database, sourceId: UUID, destinationId: UUID) throws {
+        guard sourceId != destinationId else { return }
+        let captureIds = try String.fetchAll(
+            db,
+            sql: "SELECT captureId FROM captureTag WHERE tagId = ?",
+            arguments: [sourceId.uuidString]
+        )
+        for captureId in captureIds {
+            try db.execute(
+                sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
+                arguments: [captureId, destinationId.uuidString]
+            )
+        }
+        try CaptureTag
+            .filter(Column("tagId") == sourceId.uuidString)
+            .deleteAll(db)
+        try Tag.deleteOne(db, key: sourceId)
+    }
+
+    private static func recalculateTagUsageCounts(_ db: Database) throws {
+        try db.execute(sql: """
+            UPDATE tag
+            SET usageCount = (
+                SELECT COUNT(*)
+                FROM captureTag
+                WHERE captureTag.tagId = tag.id
+            )
+            """)
+    }
+
+    private static func deleteUnusedTags(_ db: Database) throws {
+        try Tag.filter(Column("usageCount") == 0).deleteAll(db)
     }
 }
 
@@ -153,4 +271,5 @@ final class DatabaseManager {
 extension Notification.Name {
     static let newCaptureCreated = Notification.Name("EZClipNewCaptureCreated")
     static let captureDeleted = Notification.Name("EZClipCaptureDeleted")
+    static let captureTagsChanged = Notification.Name("EZClipCaptureTagsChanged")
 }

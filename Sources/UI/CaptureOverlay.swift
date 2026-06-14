@@ -9,7 +9,6 @@ final class CaptureOverlay {
     private var hostingView: NSHostingView<NotchOverlayView>?
     private let state = OverlayState()
     private var dismissTask: Task<Void, Never>?
-    private let panelSize = NSSize(width: 360, height: 96)
 
     private init() {}
 
@@ -44,10 +43,14 @@ final class CaptureOverlay {
     }
 
     private func ensurePanel() {
-        if panel != nil { return }
+        if panel != nil {
+            positionPanel()
+            return
+        }
 
         let view = NotchOverlayView(state: state)
         let hosting = NSHostingView(rootView: view)
+        let panelSize = calibratedPanelSize()
         hosting.frame = NSRect(origin: .zero, size: panelSize)
 
         let panel = NotchPanel(
@@ -66,6 +69,23 @@ final class CaptureOverlay {
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
         panel.contentView = hosting
 
+        panel.setContentSize(panelSize)
+        hosting.frame = NSRect(origin: .zero, size: panelSize)
+        positionPanel(panel: panel, panelSize: panelSize)
+        panel.orderFrontRegardless()
+        self.panel = panel
+        self.hostingView = hosting
+    }
+
+    private func positionPanel() {
+        guard let panel else { return }
+        let panelSize = calibratedPanelSize()
+        panel.setContentSize(panelSize)
+        hostingView?.frame = NSRect(origin: .zero, size: panelSize)
+        positionPanel(panel: panel, panelSize: panelSize)
+    }
+
+    private func positionPanel(panel: NSPanel, panelSize: NSSize) {
         if let screen = NSScreen.main {
             let frame = screen.frame
             let safeTop = max(screen.safeAreaInsets.top, frame.height - screen.visibleFrame.maxY)
@@ -74,10 +94,10 @@ final class CaptureOverlay {
             if safeTop > 25,
                let left = screen.auxiliaryTopLeftArea?.width,
                let right = screen.auxiliaryTopRightArea?.width {
-                notchWidth = max(120, frame.width - left - right)
+                notchWidth = min(max(132, frame.width - left - right), 238)
                 notchCenterX = left + (frame.width - left - right) / 2
             } else {
-                notchWidth = 170
+                notchWidth = min(max(frame.width * 0.105, 150), 210)
                 notchCenterX = frame.midX
             }
             state.closedNotchWidth = notchWidth
@@ -89,10 +109,12 @@ final class CaptureOverlay {
             let y = frame.maxY - panelSize.height
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
+    }
 
-        panel.orderFrontRegardless()
-        self.panel = panel
-        self.hostingView = hosting
+    private func calibratedPanelSize() -> NSSize {
+        guard let screen = NSScreen.main else { return NSSize(width: 500, height: 128) }
+        let width = min(max(screen.frame.width * 0.36, 440), 620)
+        return NSSize(width: width, height: 132)
     }
 
     private func scheduleDismiss(after seconds: TimeInterval) {
@@ -102,7 +124,7 @@ final class CaptureOverlay {
             withAnimation(.easeInOut(duration: 0.34)) {
                 state.phase = .hidden
             }
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
             panel?.close()
             panel = nil
             hostingView = nil
@@ -161,23 +183,23 @@ private struct NotchOverlayView: View {
     private var width: CGFloat {
         switch state.phase {
         case .hidden: state.closedNotchWidth
-        case .capturing: state.closedNotchWidth + 72
-        case .saved: state.thumbnail == nil ? state.closedNotchWidth + 108 : state.closedNotchWidth + 140
-        case .enriched: state.closedNotchWidth + 168
-        case .failed: state.closedNotchWidth + 92
+        case .capturing: state.closedNotchWidth + 108
+        case .saved: state.thumbnail == nil ? state.closedNotchWidth + 136 : state.closedNotchWidth + 172
+        case .enriched: state.closedNotchWidth + 208
+        case .failed: state.closedNotchWidth + 124
         }
     }
 
     private var height: CGFloat {
         switch state.phase {
-        case .hidden: 32
-        case .capturing: 48
-        default: 52
+        case .hidden: 34
+        case .capturing: 58
+        default: 62
         }
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             leadIcon
 
             if state.phase == .enriched {
@@ -193,12 +215,13 @@ private struct NotchOverlayView: View {
         }
         .opacity(state.phase == .hidden ? 0.72 : 1)
         .frame(width: width, height: height)
-        .padding(.top, 0)
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
         .background(
             UnevenRoundedRectangle(
                 topLeadingRadius: 0,
-                bottomLeadingRadius: state.phase == .hidden ? 14 : 24,
-                bottomTrailingRadius: state.phase == .hidden ? 14 : 24,
+                bottomLeadingRadius: state.phase == .hidden ? 16 : 28,
+                bottomTrailingRadius: state.phase == .hidden ? 16 : 28,
                 topTrailingRadius: 0,
                 style: .continuous
             )
@@ -207,8 +230,8 @@ private struct NotchOverlayView: View {
                 .overlay(
                     UnevenRoundedRectangle(
                         topLeadingRadius: 0,
-                        bottomLeadingRadius: state.phase == .hidden ? 14 : 24,
-                        bottomTrailingRadius: state.phase == .hidden ? 14 : 24,
+                        bottomLeadingRadius: state.phase == .hidden ? 16 : 28,
+                        bottomTrailingRadius: state.phase == .hidden ? 16 : 28,
                         topTrailingRadius: 0,
                         style: .continuous
                     )
@@ -219,14 +242,14 @@ private struct NotchOverlayView: View {
         .clipShape(
             UnevenRoundedRectangle(
                 topLeadingRadius: 0,
-                bottomLeadingRadius: state.phase == .hidden ? 14 : 24,
-                bottomTrailingRadius: state.phase == .hidden ? 14 : 24,
+                bottomLeadingRadius: state.phase == .hidden ? 16 : 28,
+                bottomTrailingRadius: state.phase == .hidden ? 16 : 28,
                 topTrailingRadius: 0,
                 style: .continuous
             )
         )
-        .animation(.spring(response: state.phase == .hidden ? 0.62 : 0.58, dampingFraction: state.phase == .hidden ? 1.0 : 0.82), value: width)
-        .animation(.spring(response: state.phase == .hidden ? 0.62 : 0.58, dampingFraction: state.phase == .hidden ? 1.0 : 0.82), value: height)
+        .animation(.spring(response: state.phase == .hidden ? 0.52 : 0.72, dampingFraction: state.phase == .hidden ? 1.0 : 0.86), value: width)
+        .animation(.spring(response: state.phase == .hidden ? 0.52 : 0.72, dampingFraction: state.phase == .hidden ? 1.0 : 0.86), value: height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -251,7 +274,7 @@ private struct NotchOverlayView: View {
             }
         default:
             Image(systemName: "camera.shutter.button.fill")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
                 .symbolEffect(.pulse.byLayer, options: .repeating.speed(0.35), value: state.phase == .capturing)
         }

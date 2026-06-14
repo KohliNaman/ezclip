@@ -144,6 +144,9 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .captureDeleted)) { _ in
             Task { await viewModel.loadAll() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .captureTagsChanged)) { _ in
+            Task { await viewModel.loadAll() }
+        }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }

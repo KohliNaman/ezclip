@@ -17,10 +17,13 @@ if security find-identity -v -p codesigning | grep -Fq "\"${DEV_SIGN_IDENTITY}\"
       CODE_SIGN_STYLE=Manual
       DEVELOPMENT_TEAM=
       CODE_SIGN_IDENTITY="${DEV_SIGN_IDENTITY}"
-      OTHER_CODE_SIGN_FLAGS=--options=runtime
+      ENABLE_DEBUG_DYLIB=NO
     )
 else
     echo "==> Persistent signing identity '${DEV_SIGN_IDENTITY}' not found; using project signing defaults"
+    XCODE_SIGN_ARGS=(
+      ENABLE_DEBUG_DYLIB=NO
+    )
 fi
 
 if command -v xcodegen >/dev/null 2>&1; then
@@ -29,28 +32,22 @@ if command -v xcodegen >/dev/null 2>&1; then
 fi
 
 echo "==> Building Debug arm64"
-if [ "${#XCODE_SIGN_ARGS[@]}" -gt 0 ]; then
-    xcodebuild build \
-      -quiet \
-      -project ezclip.xcodeproj \
-      -scheme ezclip \
-      -configuration Debug \
-      -destination "platform=macOS,arch=arm64" \
-      -derivedDataPath "$DERIVED_DATA" \
-      "${XCODE_SIGN_ARGS[@]}"
-else
-    xcodebuild build \
-      -quiet \
-      -project ezclip.xcodeproj \
-      -scheme ezclip \
-      -configuration Debug \
-      -destination "platform=macOS,arch=arm64" \
-      -derivedDataPath "$DERIVED_DATA"
-fi
+xcodebuild build \
+  -quiet \
+  -project ezclip.xcodeproj \
+  -scheme ezclip \
+  -configuration Debug \
+  -destination "platform=macOS,arch=arm64" \
+  -derivedDataPath "$DERIVED_DATA" \
+  "${XCODE_SIGN_ARGS[@]}"
 
 if security find-identity -v -p codesigning | grep -Fq "\"${DEV_SIGN_IDENTITY}\""; then
     echo "==> Re-signing app with ${DEV_SIGN_IDENTITY}"
-    codesign --force --deep --sign "${DEV_SIGN_IDENTITY}" --options runtime "$APP_PATH"
+    find "$APP_PATH/Contents" \( -type f -perm +111 -o -name "*.dylib" -o -name "*.framework" -o -name "*.xpc" \) -print0 2>/dev/null \
+      | while IFS= read -r -d '' item; do
+          codesign --force --sign "${DEV_SIGN_IDENTITY}" "$item" 2>/dev/null || true
+        done
+    codesign --force --sign "${DEV_SIGN_IDENTITY}" "$APP_PATH"
 fi
 
 echo "==> Installing to ${INSTALL_PATH}"

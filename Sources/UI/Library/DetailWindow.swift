@@ -96,11 +96,13 @@ final class DetailViewModel: ObservableObject {
     @Published private(set) var captures: [Capture]
     @Published var currentIndex: Int
     @Published var currentTags: [String] = []
+    @Published var currentAIContext: CaptureAIContext?
+    @Published var tagError: String?
 
     init(captures: [Capture], startIndex: Int) {
         self.captures = captures
         self.currentIndex = startIndex
-        Task { await loadCurrentTags() }
+        Task { await loadCurrentMetadata() }
     }
 
     var capture: Capture {
@@ -116,13 +118,13 @@ final class DetailViewModel: ObservableObject {
     func goPrevious() {
         guard canGoPrevious else { return }
         currentIndex -= 1
-        Task { await loadCurrentTags() }
+        Task { await loadCurrentMetadata() }
     }
 
     func goNext() {
         guard canGoNext else { return }
         currentIndex += 1
-        Task { await loadCurrentTags() }
+        Task { await loadCurrentMetadata() }
     }
 
     func updateCurrentNotes(_ notes: String) async {
@@ -150,6 +152,21 @@ final class DetailViewModel: ObservableObject {
         }
     }
 
+    func loadCurrentMetadata() async {
+        await loadCurrentTags()
+        await loadCurrentAIContext()
+    }
+
+    func loadCurrentAIContext() async {
+        guard currentIndex >= 0, currentIndex < captures.count else { return }
+        do {
+            currentAIContext = try await DatabaseManager.shared.aiTaggingContext(for: capture.id)
+        } catch {
+            print("Failed to load AI context: \(error)")
+            currentAIContext = nil
+        }
+    }
+
     func addTag(_ name: String) async {
         let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty, !currentTags.contains(normalized) else { return }
@@ -160,14 +177,25 @@ final class DetailViewModel: ObservableObject {
         await setTags(currentTags.filter { $0 != name })
     }
 
+    func generateAITags() async {
+        guard currentIndex >= 0, currentIndex < captures.count else { return }
+        await AITaggingService.shared.generateTags(for: capture)
+        await loadCurrentMetadata()
+    }
+
     private func setTags(_ tags: [String]) async {
         guard currentIndex >= 0, currentIndex < captures.count else { return }
         do {
-            try await DatabaseManager.shared.setTagNames(tags, for: capture.id)
+            let normalized = DatabaseManager.normalizedTagNames(tags)
+            try await DatabaseManager.shared.setTagNames(normalized, for: capture.id)
+            tagError = nil
+            currentTags = normalized
             await loadCurrentTags()
             NotificationCenter.default.post(name: .captureTagsChanged, object: nil)
         } catch {
             print("Failed to update tags: \(error)")
+            tagError = error.localizedDescription
+            await loadCurrentTags()
         }
     }
 }

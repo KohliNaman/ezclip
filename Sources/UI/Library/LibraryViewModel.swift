@@ -9,6 +9,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var collections: [Collection] = []
     @Published var tags: [Tag] = []
     @Published var captureTagsByCaptureID: [UUID: Set<String>] = [:]
+    @Published var aiContextsByCaptureID: [UUID: CaptureAIContext] = [:]
     @Published var searchText: String = ""
     @Published var selectedContextType: ContextType?
     @Published var selectedCollectionId: UUID?
@@ -71,6 +72,10 @@ final class LibraryViewModel: ObservableObject {
                 }
                 return tagsByCapture
             }
+            aiContextsByCaptureID = try await self.db.allAITaggingContexts()
+                .reduce(into: [:]) { partial, context in
+                    partial[context.captureId] = context
+                }
         } catch {
             print("Failed to load library: \(error)")
         }
@@ -104,6 +109,8 @@ final class LibraryViewModel: ObservableObject {
                 (capture.artistName?.localizedCaseInsensitiveContains(query) ?? false) ||
                 (capture.designFileName?.localizedCaseInsensitiveContains(query) ?? false) ||
                 (capture.notes?.localizedCaseInsensitiveContains(query) ?? false) ||
+                tagContextMatches(capture, query: query) ||
+                aiContextMatches(capture, query: query) ||
                 designContextMatches(capture.designContextJSON, query: query)
             }
         }
@@ -185,6 +192,51 @@ final class LibraryViewModel: ObservableObject {
         } catch {
             print("Failed to merge tag: \(error)")
         }
+    }
+
+    func addTags(_ tagInput: String, to captureIds: Set<UUID>) async {
+        let names = Self.parseTagInput(tagInput)
+        guard !names.isEmpty, !captureIds.isEmpty else { return }
+        do {
+            try await db.addTagNames(names, to: captureIds)
+            selectedCaptureIDs.removeAll()
+            lastSelectedCaptureID = nil
+            isSelectionMode = false
+            await loadAll()
+            NotificationCenter.default.post(name: .captureTagsChanged, object: nil)
+        } catch {
+            print("Failed to add tags: \(error)")
+        }
+    }
+
+    func removeTags(_ tagInput: String, from captureIds: Set<UUID>) async {
+        let names = Self.parseTagInput(tagInput)
+        guard !names.isEmpty, !captureIds.isEmpty else { return }
+        do {
+            try await db.removeTagNames(names, from: captureIds)
+            selectedCaptureIDs.removeAll()
+            lastSelectedCaptureID = nil
+            isSelectionMode = false
+            await loadAll()
+            NotificationCenter.default.post(name: .captureTagsChanged, object: nil)
+        } catch {
+            print("Failed to remove tags: \(error)")
+        }
+    }
+
+    func generateAITags(for capture: Capture) async {
+        await AITaggingService.shared.generateTags(for: capture)
+        await loadAll()
+    }
+
+    func generateAITagsForSelectedCaptures() async {
+        let selected = captures.filter { selectedCaptureIDs.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        await AITaggingService.shared.generateTags(for: selected)
+        selectedCaptureIDs.removeAll()
+        lastSelectedCaptureID = nil
+        isSelectionMode = false
+        await loadAll()
     }
 
     func deleteCapture(_ capture: Capture) async {
@@ -324,8 +376,20 @@ final class LibraryViewModel: ObservableObject {
             .filter { selectedCaptureIDs.contains($0.id) }
             .compactMap { ImageStorageManager.shared.fullImage(for: $0) }
         guard !images.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects(images)
+        ClipboardManager.shared.copyToClipboard(images)
+    }
+
+    private func tagContextMatches(_ capture: Capture, query: String) -> Bool {
+        captureTagsByCaptureID[capture.id]?.contains { tag in
+            tag.localizedCaseInsensitiveContains(query)
+        } == true
+    }
+
+    private func aiContextMatches(_ capture: Capture, query: String) -> Bool {
+        guard let context = aiContextsByCaptureID[capture.id] else { return false }
+        return context.visibleTags.contains { $0.localizedCaseInsensitiveContains(query) } ||
+        context.hiddenSearchTags.contains { $0.localizedCaseInsensitiveContains(query) } ||
+        (context.summary?.localizedCaseInsensitiveContains(query) ?? false)
     }
 
     private func designContextMatches(_ json: String?, query: String) -> Bool {
@@ -354,6 +418,16 @@ final class LibraryViewModel: ObservableObject {
             (button.backgroundColor?.localizedCaseInsensitiveContains(query) ?? false) ||
             (button.color?.localizedCaseInsensitiveContains(query) ?? false)
         }
+    }
+
+    static func parseTagInput(_ input: String) -> [String] {
+        DatabaseManager.normalizedTagNames(
+            input
+                .split { character in
+                    character == "," || character == "\n"
+                }
+                .map(String.init)
+        )
     }
 }
 

@@ -5,7 +5,17 @@ struct SettingsView: View {
     @AppStorage("ezclip.hotkeyEnabled") private var hotkeyEnabled = true
     @AppStorage("ezclip.showNotifications") private var showNotifications = true
     @AppStorage("ezclip.autoLaunch") private var autoLaunch = false
+    @AppStorage("ezclip.ai.provider") private var aiProvider = AITaggingProviderKind.off.rawValue
+    @AppStorage("ezclip.ai.autoTagNewCaptures") private var autoTagNewCaptures = false
+    @AppStorage("ezclip.ai.bypassRateLimit") private var bypassAIRateLimit = false
+    @AppStorage("ezclip.ai.maxTagsPerRun") private var maxTagsPerRun = 12
+    @AppStorage("ezclip.ai.delayBetweenRequests") private var delayBetweenRequests = 8.0
+    @AppStorage("ezclip.ai.geminiModel") private var geminiModel = "gemini-3.1-flash-lite"
     @State private var permissionsOK = false
+    @State private var geminiAPIKey = ""
+    @State private var isBackfillingAITags = false
+    @State private var aiBackfillMessage: String?
+    @State private var appleLocalAvailability = AppleFoundationTaggingProvider.availability()
 
     var body: some View {
         TabView {
@@ -19,14 +29,163 @@ struct SettingsView: View {
                     Label("Permissions", systemImage: "hand.raised")
                 }
 
+            aiTab
+                .tabItem {
+                    Label("AI", systemImage: "sparkles")
+                }
+
             aboutTab
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 450, height: 350)
+        .frame(width: 480, height: 390)
         .task {
             checkPermissions()
+            geminiAPIKey = KeychainStore.string(for: "geminiAPIKey")
+                ?? UserDefaults.standard.string(forKey: "ezclip.ai.geminiAPIKey")
+                ?? ""
+            refreshAppleLocalAvailability()
+        }
+    }
+
+    // MARK: - AI
+
+    private var aiTab: some View {
+        Form {
+            Section("Provider") {
+                Picker("AI tagging", selection: $aiProvider) {
+                    ForEach(AITaggingProviderKind.allCases) { provider in
+                        Text(provider.displayName).tag(provider.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle("Auto-tag new captures", isOn: $autoTagNewCaptures)
+                    .disabled(aiProvider == AITaggingProviderKind.off.rawValue)
+            }
+
+            if aiProvider == AITaggingProviderKind.gemini.rawValue {
+                Section("Gemini") {
+                    SecureField("API key", text: $geminiAPIKey)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: geminiAPIKey) { _, newValue in
+                            KeychainStore.setString(newValue.trimmingCharacters(in: .whitespacesAndNewlines), for: "geminiAPIKey")
+                            UserDefaults.standard.removeObject(forKey: "ezclip.ai.geminiAPIKey")
+                        }
+                    TextField("Model", text: $geminiModel)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Default: gemini-3.1-flash-lite")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if aiProvider == AITaggingProviderKind.appleLocal.rawValue {
+                Section("Apple Local") {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(appleLocalAvailabilityColor)
+                            .frame(width: 9, height: 9)
+                            .accessibilityLabel(appleLocalAvailabilityLabel)
+                        Text(appleLocalAvailabilityLabel)
+                        Spacer()
+                        Button {
+                            refreshAppleLocalAvailability()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Refresh Apple Local availability")
+                    }
+
+                    Text(appleLocalAvailability.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("This local path currently uses capture metadata/design context. Gemini is still required for full screenshot vision tagging.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Battery") {
+                Toggle("Bypass AI rate limit", isOn: $bypassAIRateLimit)
+
+                Stepper("Max per run: \(maxTagsPerRun)", value: $maxTagsPerRun, in: 1...200)
+                    .disabled(bypassAIRateLimit)
+
+                Stepper("Delay: \(Int(delayBetweenRequests))s", value: $delayBetweenRequests, in: 0...60, step: 1)
+                    .disabled(bypassAIRateLimit)
+            }
+
+            Section("Existing Captures") {
+                Button {
+                    backfillExistingCaptures()
+                } label: {
+                    if isBackfillingAITags {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.65)
+                            Text("Tagging Previous Captures")
+                        }
+                    } else {
+                        Label("AI Tag Previous Captures", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+                .disabled(isBackfillingAITags || aiProvider == AITaggingProviderKind.off.rawValue)
+
+                if let aiBackfillMessage {
+                    Text(aiBackfillMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(10)
+        .onChange(of: aiProvider) { _, newValue in
+            if newValue == AITaggingProviderKind.appleLocal.rawValue {
+                refreshAppleLocalAvailability()
+            }
+        }
+    }
+
+    private var appleLocalAvailabilityColor: Color {
+        switch appleLocalAvailability.state {
+        case .available: .green
+        case .unavailable: .red
+        case .unknown: .yellow
+        }
+    }
+
+    private var appleLocalAvailabilityLabel: String {
+        switch appleLocalAvailability.state {
+        case .available: "Available on this Mac"
+        case .unavailable: "Unavailable on this Mac"
+        case .unknown: "Availability unknown"
+        }
+    }
+
+    private func refreshAppleLocalAvailability() {
+        appleLocalAvailability = AppleFoundationTaggingProvider.availability()
+    }
+
+    private func backfillExistingCaptures() {
+        isBackfillingAITags = true
+        aiBackfillMessage = nil
+        Task {
+            do {
+                let limit = bypassAIRateLimit ? nil : maxTagsPerRun
+                let captures = try await DatabaseManager.shared.capturesNeedingAITags(limit: limit)
+                await AITaggingService.shared.generateTags(for: captures, isUserInitiated: true)
+                aiBackfillMessage = captures.isEmpty
+                    ? "No previous captures need AI tags."
+                    : "Queued \(captures.count) previous captures."
+            } catch {
+                aiBackfillMessage = error.localizedDescription
+            }
+            isBackfillingAITags = false
         }
     }
 

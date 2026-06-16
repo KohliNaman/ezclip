@@ -10,6 +10,7 @@ private final class ThumbnailLoadResult: @unchecked Sendable {
 
 struct CaptureCardView: View {
     let capture: Capture
+    var tags: [String] = []
     var isSelected: Bool = false
     var showsSelection: Bool = false
     @State private var thumbnail: NSImage?
@@ -107,6 +108,26 @@ struct CaptureCardView: View {
                     Text(capture.displayDate)
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
+                }
+
+                if !tags.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(tags.prefix(2), id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 9))
+                                .lineLimit(1)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(.quaternary.opacity(0.65))
+                                .clipShape(Capsule())
+                        }
+                        if tags.count > 2 {
+                            Text("+\(tags.count - 2)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.horizontal, 8)

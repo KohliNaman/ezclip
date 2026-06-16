@@ -4,6 +4,7 @@ struct LibraryView: View {
     @EnvironmentObject var viewModel: LibraryViewModel
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showingSettings = false
+    @State private var bulkTagMode: BulkTagMode?
     @State private var keyMonitor: Any?
 
     var body: some View {
@@ -30,6 +31,7 @@ struct LibraryView: View {
                             ForEach(visibleCaptures) { capture in
                                 CaptureCardView(
                                     capture: capture,
+                                    tags: Array(viewModel.captureTagsByCaptureID[capture.id] ?? []).sorted(),
                                     isSelected: viewModel.selectedCaptureIDs.contains(capture.id),
                                     showsSelection: viewModel.isSelectionMode
                                 )
@@ -53,6 +55,12 @@ struct LibraryView: View {
                                         Divider()
 
                                         collectionMenu(for: capture)
+
+                                        Divider()
+
+                                        Button("Generate AI Tags") {
+                                            Task { await viewModel.generateAITags(for: capture) }
+                                        }
 
                                         Divider()
 
@@ -105,6 +113,22 @@ struct LibraryView: View {
                             }
                             .disabled(viewModel.selectedCaptureIDs.isEmpty)
 
+                            Menu {
+                                Button("Add Tags") {
+                                    bulkTagMode = .add
+                                }
+                                Button("Remove Tags") {
+                                    bulkTagMode = .remove
+                                }
+                                Divider()
+                                Button("Generate AI Tags") {
+                                    Task { await viewModel.generateAITagsForSelectedCaptures() }
+                                }
+                            } label: {
+                                Label("Tag", systemImage: "tag")
+                            }
+                            .disabled(viewModel.selectedCaptureIDs.isEmpty)
+
                             Button(role: .destructive) {
                                 Task { await viewModel.deleteSelectedCaptures() }
                             } label: {
@@ -147,8 +171,27 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .captureTagsChanged)) { _ in
             Task { await viewModel.loadAll() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .captureAIContextChanged)) { _ in
+            Task { await viewModel.loadAll() }
+        }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
+        }
+        .sheet(item: $bulkTagMode) { mode in
+            BulkTagSheet(mode: mode, captureCount: viewModel.selectedCaptureIDs.count) { text in
+                let ids = viewModel.selectedCaptureIDs
+                Task {
+                    switch mode {
+                    case .add:
+                        await viewModel.addTags(text, to: ids)
+                    case .remove:
+                        await viewModel.removeTags(text, from: ids)
+                    }
+                    bulkTagMode = nil
+                }
+            } onCancel: {
+                bulkTagMode = nil
+            }
         }
         .onAppear {
             guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
@@ -288,6 +331,53 @@ struct LibraryView: View {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
         }
+    }
+}
+
+private enum BulkTagMode: String, Identifiable {
+    case add
+    case remove
+
+    var id: String { rawValue }
+    var title: String { self == .add ? "Add Tags" : "Remove Tags" }
+    var actionTitle: String { self == .add ? "Add" : "Remove" }
+}
+
+private struct BulkTagSheet: View {
+    let mode: BulkTagMode
+    let captureCount: Int
+    let onSubmit: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var tagText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(mode.title)
+                .font(.headline)
+            Text("\(mode.actionTitle) tags for \(captureCount) selected captures.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("pricing page, sidebar nav, dense table", text: $tagText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(submit)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.escape)
+                Button(mode.actionTitle, action: submit)
+                    .keyboardShortcut(.return)
+                    .disabled(LibraryViewModel.parseTagInput(tagText).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
+
+    private func submit() {
+        let text = tagText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !LibraryViewModel.parseTagInput(text).isEmpty else { return }
+        onSubmit(text)
     }
 }
 

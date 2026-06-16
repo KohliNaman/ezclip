@@ -1,6 +1,17 @@
 import Foundation
 import GRDB
 
+enum TaggingDatabaseError: LocalizedError {
+    case captureMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .captureMissing:
+            "This capture is no longer in the library. Close and reopen the detail view, then try tagging again."
+        }
+    }
+}
+
 @MainActor
 final class DatabaseManager {
     static let shared = DatabaseManager()
@@ -100,6 +111,37 @@ final class DatabaseManager {
             }
         }
 
+        migrator.registerMigration("v3_ai_tagging_context") { db in
+            try db.create(table: "captureAIContext", ifNotExists: true) { t in
+                t.column("captureId", .text)
+                    .primaryKey()
+                    .references("capture", onDelete: .cascade)
+                t.column("visibleTagsJSON", .text).notNull().defaults(to: "[]")
+                t.column("hiddenSearchTagsJSON", .text).notNull().defaults(to: "[]")
+                t.column("summary", .text)
+                t.column("provider", .text).notNull()
+                t.column("model", .text).notNull()
+                t.column("status", .text).notNull()
+                t.column("error", .text)
+                t.column("confidence", .double)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+
+            try db.create(index: "idx_captureAIContext_status", on: "captureAIContext", columns: ["status"])
+            try db.create(index: "idx_captureAIContext_provider", on: "captureAIContext", columns: ["provider"])
+            try db.create(index: "idx_captureTag_captureId", on: "captureTag", columns: ["captureId"])
+            try db.create(index: "idx_captureTag_tagId", on: "captureTag", columns: ["tagId"])
+        }
+
+        migrator.registerMigration("v4_clear_invalid_ai_tagging_fk_errors") { db in
+            try db.execute(sql: """
+                DELETE FROM captureAIContext
+                WHERE status = ?
+                  AND error LIKE ?
+                """, arguments: [AITaggingStatus.failed.rawValue, "%FOREIGN KEY constraint failed%"])
+        }
+
         return migrator
     }
 
@@ -141,7 +183,7 @@ final class DatabaseManager {
             for tagId in tagIds {
                 try db.execute(
                     sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
-                    arguments: [captureId.uuidString, tagId.uuidString]
+                    arguments: [captureId, tagId]
                 )
             }
             try Self.recalculateTagUsageCounts(db)
@@ -159,34 +201,85 @@ final class DatabaseManager {
                 WHERE captureTag.captureId = ?
                 ORDER BY tag.name COLLATE NOCASE
                 """,
-                arguments: [captureId.uuidString]
+                arguments: [captureId]
             )
+        }
+    }
+
+    func allAITaggingContexts() async throws -> [CaptureAIContext] {
+        try await read { db in
+            try CaptureAIContext.fetchAll(db)
+        }
+    }
+
+    func capturesNeedingAITags(limit: Int? = nil) async throws -> [Capture] {
+        try await read { db in
+            var sql = """
+            SELECT capture.*
+            FROM capture
+            LEFT JOIN captureAIContext ON captureAIContext.captureId = capture.id
+            WHERE capture.parentCaptureId IS NULL
+              AND (captureAIContext.captureId IS NULL OR captureAIContext.status != ?)
+            ORDER BY capture.timestamp DESC
+            """
+            var arguments: StatementArguments = [AITaggingStatus.complete.rawValue]
+            if let limit {
+                sql += "\nLIMIT ?"
+                arguments += [limit]
+            }
+            return try Capture.fetchAll(db, sql: sql, arguments: arguments)
+        }
+    }
+
+    func aiTaggingContext(for captureId: UUID) async throws -> CaptureAIContext? {
+        try await read { db in
+            try CaptureAIContext.fetchOne(db, key: captureId)
         }
     }
 
     func setTagNames(_ names: [String], for captureId: UUID) async throws {
         try await write { db in
             let normalizedNames = Array(Set(names.map(Self.normalizedTagName).filter { !$0.isEmpty })).sorted()
-            try CaptureTag
-                .filter(Column("captureId") == captureId.uuidString)
-                .deleteAll(db)
+            try Self.setTagNames(normalizedNames, for: captureId, db: db)
+            try Self.recalculateTagUsageCounts(db)
+            try Self.deleteUnusedTags(db)
+        }
+    }
 
-            for name in normalizedNames {
-                let tag: Tag
-                if let existing = try Tag.filter(Tag.Columns.name == name).fetchOne(db) {
-                    tag = existing
-                } else {
-                    var created = Tag(id: UUID(), name: name, usageCount: 0)
-                    try created.insert(db)
-                    tag = created
-                }
-                try db.execute(
-                    sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
-                    arguments: [captureId.uuidString, tag.id.uuidString]
-                )
+    func addTagNames(_ names: [String], to captureIds: Set<UUID>) async throws {
+        guard !captureIds.isEmpty else { return }
+        try await write { db in
+            let normalizedNames = Array(Set(names.map(Self.normalizedTagName).filter { !$0.isEmpty })).sorted()
+            guard !normalizedNames.isEmpty else { return }
+            for captureId in captureIds {
+                var existingNames = try Self.tagNames(for: captureId, db: db)
+                existingNames.formUnion(normalizedNames)
+                try Self.setTagNames(Array(existingNames).sorted(), for: captureId, db: db)
             }
             try Self.recalculateTagUsageCounts(db)
             try Self.deleteUnusedTags(db)
+        }
+    }
+
+    func removeTagNames(_ names: [String], from captureIds: Set<UUID>) async throws {
+        guard !captureIds.isEmpty else { return }
+        try await write { db in
+            let normalizedNames = Set(names.map(Self.normalizedTagName).filter { !$0.isEmpty })
+            guard !normalizedNames.isEmpty else { return }
+            for captureId in captureIds {
+                var existingNames = try Self.tagNames(for: captureId, db: db)
+                existingNames.subtract(normalizedNames)
+                try Self.setTagNames(Array(existingNames).sorted(), for: captureId, db: db)
+            }
+            try Self.recalculateTagUsageCounts(db)
+            try Self.deleteUnusedTags(db)
+        }
+    }
+
+    func saveAITaggingContext(_ context: CaptureAIContext) async throws {
+        try await write { db in
+            var mutable = context
+            try mutable.save(db)
         }
     }
 
@@ -212,7 +305,7 @@ final class DatabaseManager {
     func deleteTag(id: UUID) async throws {
         try await write { db in
             try CaptureTag
-                .filter(Column("tagId") == id.uuidString)
+                .filter(Column("tagId") == id)
                 .deleteAll(db)
             try Tag.deleteOne(db, key: id)
             try Self.recalculateTagUsageCounts(db)
@@ -227,25 +320,68 @@ final class DatabaseManager {
         }
     }
 
-    private static func normalizedTagName(_ value: String) -> String {
+    nonisolated private static func normalizedTagName(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    nonisolated static func normalizedTagNames(_ values: [String]) -> [String] {
+        Array(Set(values.map(normalizedTagName).filter { !$0.isEmpty })).sorted()
+    }
+
+    private static func tagNames(for captureId: UUID, db: Database) throws -> Set<String> {
+        let names = try String.fetchAll(
+            db,
+            sql: """
+            SELECT tag.name
+            FROM tag
+            JOIN captureTag ON captureTag.tagId = tag.id
+            WHERE captureTag.captureId = ?
+            """,
+            arguments: [captureId]
+        )
+        return Set(names)
+    }
+
+    private static func setTagNames(_ names: [String], for captureId: UUID, db: Database) throws {
+        guard try Capture.fetchOne(db, key: captureId) != nil else {
+            throw TaggingDatabaseError.captureMissing
+        }
+
+        try CaptureTag
+            .filter(Column("captureId") == captureId)
+            .deleteAll(db)
+
+        for name in names {
+            let tag: Tag
+            if let existing = try Tag.filter(Tag.Columns.name == name).fetchOne(db) {
+                tag = existing
+            } else {
+                var created = Tag(id: UUID(), name: name, usageCount: 0)
+                try created.insert(db)
+                tag = created
+            }
+            try db.execute(
+                sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
+                arguments: [captureId, tag.id]
+            )
+        }
     }
 
     private static func mergeTag(_ db: Database, sourceId: UUID, destinationId: UUID) throws {
         guard sourceId != destinationId else { return }
-        let captureIds = try String.fetchAll(
+        let captureIds = try UUID.fetchAll(
             db,
             sql: "SELECT captureId FROM captureTag WHERE tagId = ?",
-            arguments: [sourceId.uuidString]
+            arguments: [sourceId]
         )
         for captureId in captureIds {
             try db.execute(
                 sql: "INSERT OR IGNORE INTO captureTag (captureId, tagId) VALUES (?, ?)",
-                arguments: [captureId, destinationId.uuidString]
+                arguments: [captureId, destinationId]
             )
         }
         try CaptureTag
-            .filter(Column("tagId") == sourceId.uuidString)
+            .filter(Column("tagId") == sourceId)
             .deleteAll(db)
         try Tag.deleteOne(db, key: sourceId)
     }
@@ -272,4 +408,5 @@ extension Notification.Name {
     static let newCaptureCreated = Notification.Name("EZClipNewCaptureCreated")
     static let captureDeleted = Notification.Name("EZClipCaptureDeleted")
     static let captureTagsChanged = Notification.Name("EZClipCaptureTagsChanged")
+    static let captureAIContextChanged = Notification.Name("EZClipCaptureAIContextChanged")
 }

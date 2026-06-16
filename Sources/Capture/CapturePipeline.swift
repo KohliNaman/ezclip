@@ -22,7 +22,6 @@ final class CapturePipeline {
 
             let captureId = UUID()
             let (fullPath, thumbPath) = try storage.saveScreenshot(image, captureId: captureId)
-            ClipboardManager.shared.copyToClipboard(image)
 
             var capture = Capture(
                 id: captureId,
@@ -48,6 +47,10 @@ final class CapturePipeline {
                 appName: windowInfo.appName,
                 bundleId: windowInfo.bundleId
             )
+
+            Task { @MainActor in
+                ClipboardManager.shared.copyToClipboard(image)
+            }
 
             Task { @MainActor in
                 await resolveContext(for: capture, windowInfo: windowInfo)
@@ -87,8 +90,12 @@ final class CapturePipeline {
 
             try await repository.replaceTags(for: updated, names: Self.deriveAutoTags(from: updated))
             NotificationCenter.default.post(name: .newCaptureCreated, object: updated)
-            CaptureOverlay.shared.showEnriched(enrichedContext)
             showNotification(for: updated)
+            if AITaggingSettings.current.autoTagNewCaptures {
+                Task { @MainActor in
+                    await AITaggingService.shared.generateTags(for: updated, isUserInitiated: false)
+                }
+            }
             print("🧭 Context resolved: \(updated.contextDescription)")
         } catch {
             try? await repository.markContextFailed(captureId: capture.id)

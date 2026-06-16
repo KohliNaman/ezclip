@@ -17,6 +17,7 @@ struct SimpleDetailView: View {
     @State private var eventMonitor: Any?
     @State private var zoomScale: CGFloat = 1.0
     @State private var activeMagnification: CGFloat = 1.0
+    @State private var isGeneratingAITags = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,6 +49,9 @@ struct SimpleDetailView: View {
             previewImage = nil
         }
         .onChange(of: viewModel.currentIndex) { _, _ in loadCapture() }
+        .onReceive(NotificationCenter.default.publisher(for: .captureAIContextChanged)) { _ in
+            Task { await viewModel.loadCurrentAIContext() }
+        }
     }
 
     // MARK: - Key Monitor
@@ -93,6 +97,7 @@ struct SimpleDetailView: View {
         zoomScale = 1.0
         activeMagnification = 1.0
         Task { await viewModel.loadCurrentTags() }
+        Task { await viewModel.loadCurrentAIContext() }
     }
 
     // MARK: - Toolbar
@@ -126,6 +131,16 @@ struct SimpleDetailView: View {
                     copyCurrentImage()
                 }) { Label("Copy Image", systemImage: "doc.on.doc") }
                 .buttonStyle(.bordered).controlSize(.small)
+                Button(action: generateAITags) {
+                    if isGeneratingAITags || viewModel.currentAIContext?.status == .pending {
+                        Label("Tagging", systemImage: "sparkles")
+                    } else {
+                        Label("AI Tags", systemImage: "sparkles")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isGeneratingAITags || viewModel.currentAIContext?.status == .pending)
                 Button { onDismiss() } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3).foregroundStyle(.secondary)
@@ -297,6 +312,7 @@ struct SimpleDetailView: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
                 Spacer()
+                aiStatusView
             }
 
             if !viewModel.currentTags.isEmpty {
@@ -330,10 +346,72 @@ struct SimpleDetailView: View {
                 Button("Add") { addTagsFromField() }
                     .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+
+            if let aiStatusMessage {
+                Text(aiStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(viewModel.currentAIContext?.status == .failed ? .red : .secondary)
+            }
+
+            if let tagError = viewModel.tagError {
+                Text(tagError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
         .padding(14)
         .background(.quaternary.opacity(0.3))
         .cornerRadius(10)
+    }
+
+    @ViewBuilder
+    private var aiStatusView: some View {
+        if isGeneratingAITags || viewModel.currentAIContext?.status == .pending {
+            HStack(spacing: 5) {
+                ProgressView()
+                    .scaleEffect(0.55)
+                Text("AI tagging")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if viewModel.currentAIContext?.status == .complete {
+            Label("AI", systemImage: "sparkles")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if viewModel.currentAIContext?.status == .failed {
+            Label("Failed", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .help(viewModel.currentAIContext?.error ?? "AI tagging failed")
+        } else if viewModel.currentAIContext?.status == .skipped {
+            Label("Skipped", systemImage: "pause.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(viewModel.currentAIContext?.error ?? "AI tagging was skipped")
+        }
+    }
+
+    private var aiStatusMessage: String? {
+        guard let context = viewModel.currentAIContext else { return nil }
+        switch context.status {
+        case .pending:
+            return "AI tagging is running in the background."
+        case .complete:
+            return nil
+        case .failed:
+            return context.error ?? "AI tagging failed. Check Settings > AI."
+        case .skipped:
+            return context.error ?? "Skipped by AI rate limit."
+        }
+    }
+
+    private func generateAITags() {
+        guard !isGeneratingAITags else { return }
+        isGeneratingAITags = true
+        Task {
+            await viewModel.generateAITags()
+            isGeneratingAITags = false
+        }
     }
 
     // MARK: - Notes

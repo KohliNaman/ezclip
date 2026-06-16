@@ -27,6 +27,30 @@ final class AITaggingTests: XCTestCase {
         XCTAssertEqual(context.status, .complete)
     }
 
+    func testAutoTagsUseSiteNameWithoutDuplicateDomainTag() {
+        var capture = Capture(
+            id: UUID(),
+            timestamp: Date(),
+            appName: "Zen",
+            appBundleId: "app.zen-browser.zen",
+            windowTitle: "Video - YouTube",
+            screenshotPath: "/tmp/example.png",
+            thumbnailPath: "/tmp/example_thumb.png",
+            contextType: .website,
+            notes: nil,
+            collectionId: nil,
+            isScrolling: false,
+            scrollIndex: nil,
+            parentCaptureId: nil
+        )
+        capture.url = "https://www.youtube.com/watch?v=abc"
+
+        let tags = CapturePipeline.deriveAutoTags(from: capture)
+
+        XCTAssertTrue(tags.contains("youtube"))
+        XCTAssertFalse(tags.contains("youtube.com"))
+    }
+
     func testPromptIncludesDesignerSpecificInstructionsAndContext() {
         var capture = Capture(
             id: UUID(),

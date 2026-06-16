@@ -282,10 +282,13 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func addCollection(name: String, color: String = "blue", icon: String = "folder") async {
+    @discardableResult
+    func addCollection(name: String, color: String = "blue", icon: String = "folder") async -> Collection? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
         var collection = Collection(
             id: UUID(),
-            name: name,
+            name: trimmed,
             color: color,
             icon: icon,
             sortOrder: collections.count
@@ -295,9 +298,17 @@ final class LibraryViewModel: ObservableObject {
                 try collection.insert(db)
             }
             await loadAll()
+            return collection
         } catch {
             print("Failed to create collection: \(error)")
+            return nil
         }
+    }
+
+    func addCollectionAndAssignSelectedCaptures(name: String) async {
+        guard !selectedCaptureIDs.isEmpty else { return }
+        guard let collection = await addCollection(name: name) else { return }
+        await assignSelectedCaptures(to: collection.id)
     }
 
     func assignToCollection(_ captureId: UUID, collectionId: UUID?) async {

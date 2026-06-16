@@ -211,7 +211,7 @@ struct SidebarView: View {
 private struct TagManagementView: View {
     @EnvironmentObject var viewModel: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedTag: Tag?
+    @State private var selectedTagIDs: Set<Tag.ID> = []
     @State private var renameText = ""
 
     var body: some View {
@@ -224,7 +224,11 @@ private struct TagManagementView: View {
                     .keyboardShortcut(.return)
             }
 
-            List(viewModel.tags, selection: $selectedTag) { tag in
+            Text("Use Command-click or Shift-click to select multiple tags.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            List(viewModel.tags, selection: $selectedTagIDs) { tag in
                 HStack {
                     Label(tag.name, systemImage: "tag")
                     Spacer()
@@ -232,34 +236,60 @@ private struct TagManagementView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                .tag(tag)
+                .tag(tag.id)
             }
             .frame(minHeight: 280)
+            .onChange(of: selectedTagIDs) { _, _ in
+                renameText = singleSelectedTag?.name ?? ""
+            }
 
-            if let selectedTag {
+            if let selectedTag = singleSelectedTag {
                 HStack {
                     TextField("Rename tag", text: $renameText)
                         .textFieldStyle(.roundedBorder)
-                        .onAppear { renameText = selectedTag.name }
-                        .onChange(of: selectedTag.id) { _, _ in renameText = selectedTag.name }
                     Button("Rename") {
-                        Task { await viewModel.renameTag(selectedTag, to: renameText) }
+                        Task {
+                            await viewModel.renameTag(selectedTag, to: renameText)
+                            selectedTagIDs = []
+                            renameText = ""
+                        }
                     }
                     .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Menu("Merge") {
-                        ForEach(viewModel.tags.filter { $0.id != selectedTag.id }) { destination in
-                            Button(destination.name) {
+                    Button("Delete", role: .destructive) {
+                        Task {
+                            await viewModel.deleteTag(selectedTag)
+                            selectedTagIDs = []
+                            renameText = ""
+                        }
+                    }
+                }
+            }
+
+            if selectedTagIDs.count > 1 {
+                HStack {
+                    Text("\(selectedTagIDs.count) selected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Menu("Merge Selected") {
+                        ForEach(selectedTags) { destination in
+                            Button("Into \(destination.name)") {
                                 Task {
-                                    await viewModel.mergeTag(selectedTag, into: destination)
-                                    self.selectedTag = destination
+                                    for source in selectedTags where source.id != destination.id {
+                                        await viewModel.mergeTag(source, into: destination)
+                                    }
+                                    selectedTagIDs = [destination.id]
+                                    renameText = destination.name
                                 }
                             }
                         }
                     }
-                    Button("Delete", role: .destructive) {
+                    Button("Delete Selected", role: .destructive) {
                         Task {
-                            await viewModel.deleteTag(selectedTag)
-                            self.selectedTag = nil
+                            for tag in selectedTags {
+                                await viewModel.deleteTag(tag)
+                            }
+                            selectedTagIDs = []
                             renameText = ""
                         }
                     }
@@ -268,5 +298,14 @@ private struct TagManagementView: View {
         }
         .padding(20)
         .frame(width: 520, height: 430)
+    }
+
+    private var selectedTags: [Tag] {
+        viewModel.tags.filter { selectedTagIDs.contains($0.id) }
+    }
+
+    private var singleSelectedTag: Tag? {
+        guard selectedTagIDs.count == 1, let id = selectedTagIDs.first else { return nil }
+        return viewModel.tags.first { $0.id == id }
     }
 }

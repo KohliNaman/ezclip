@@ -119,9 +119,9 @@ final class CapturePipeline {
         var tags: [String] = [capture.appName.lowercased()]
 
         if let url = capture.url, let host = URL(string: url)?.host {
-            tags.append(host.replacingOccurrences(of: "www.", with: ""))
-            let parts = host.components(separatedBy: ".")
-            if parts.count >= 2 { tags.append(parts[parts.count - 2]) }
+            let cleanedHost = host.lowercased().replacingOccurrences(of: "www.", with: "")
+            let parts = cleanedHost.components(separatedBy: ".").filter { !$0.isEmpty }
+            tags.append(parts.count >= 2 ? parts[parts.count - 2] : cleanedHost)
         }
         if let artist = capture.artistName { tags.append(artist.lowercased()) }
         if let file = capture.designFileName { tags.append(file.lowercased()) }

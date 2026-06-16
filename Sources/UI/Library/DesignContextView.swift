@@ -34,27 +34,7 @@ struct DesignContextView: View {
                 section("Colors") {
                     LazyVGrid(columns: colorColumns, spacing: 10) {
                         ForEach(context.colors.prefix(18)) { color in
-                            HStack(spacing: 9) {
-                                RoundedRectangle(cornerRadius: 5)
-                                    .fill(Color(cssColor: color.value))
-                                    .frame(width: 28, height: 28)
-                                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(.white.opacity(0.14)))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(color.role)
-                                        .font(.caption2)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                    Text(color.displayValue)
-                                        .font(.caption.monospaced())
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(8)
-                            .background(.black.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            ColorSwatchRow(color: color)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 copy(color.displayValue)
@@ -273,6 +253,59 @@ private struct FontFamilyCard: View {
     }
 }
 
+private struct ColorSwatchRow: View {
+    let color: BrowserDesignContext.ColorInfo
+
+    var body: some View {
+        HStack(spacing: 9) {
+            ZStack {
+                Checkerboard()
+                    .opacity(color.value.cssColorComponents?.alpha ?? 1 < 1 ? 0.55 : 0)
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(cssColor: color.value))
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(.white.opacity(0.16), lineWidth: 0.5)
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(color.role)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(color.displayValue)
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .background(.black.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct Checkerboard: View {
+    var body: some View {
+        Canvas { context, size in
+            let tile: CGFloat = 6
+            for x in stride(from: CGFloat(0), to: size.width, by: tile) {
+                for y in stride(from: CGFloat(0), to: size.height, by: tile) {
+                    let isDark = (Int(x / tile) + Int(y / tile)).isMultiple(of: 2)
+                    context.fill(
+                        Path(CGRect(x: x, y: y, width: tile, height: tile)),
+                        with: .color(isDark ? .white.opacity(0.22) : .black.opacity(0.18))
+                    )
+                }
+            }
+        }
+    }
+}
+
 private struct ButtonPreview: NSViewRepresentable {
     let html: String
     let backgroundColor: String?
@@ -287,8 +320,9 @@ private struct ButtonPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        let fallbackBackground = (backgroundColor?.isTransparentCSS == false ? backgroundColor : nil) ?? "rgba(255,255,255,.92)"
-        let fallbackColor = (textColor?.isTransparentCSS == false ? textColor : nil) ?? "#151515"
+        let style = AdaptiveButtonStyle(backgroundColor: backgroundColor, textColor: textColor)
+        let fallbackBackground = style.background
+        let fallbackColor = style.text
         let document = """
         <!doctype html>
         <html>
@@ -356,6 +390,48 @@ private final class PassthroughScrollWebView: WKWebView {
     }
 }
 
+private struct AdaptiveButtonStyle {
+    let background: String
+    let text: String
+
+    init(backgroundColor: String?, textColor: String?) {
+        let backgroundComponents = backgroundColor?.cssColorComponents
+        let textComponents = textColor?.cssColorComponents
+        let resolvedBackground = backgroundComponents?.alpha ?? 0 > 0.05 ? backgroundColor! : "rgba(255,255,255,.92)"
+        let backgroundLuminance = backgroundComponents?.relativeLuminance ?? 0.92
+
+        if let textColor,
+           let textComponents,
+           textComponents.alpha > 0.05,
+           contrastRatio(textComponents.relativeLuminance, backgroundLuminance) >= 3.0 {
+            self.text = textColor
+        } else {
+            self.text = backgroundLuminance > 0.45 ? "#151515" : "#ffffff"
+        }
+        self.background = resolvedBackground
+    }
+}
+
+private struct CSSColorComponents {
+    var red: Double
+    var green: Double
+    var blue: Double
+    var alpha: Double
+
+    var relativeLuminance: Double {
+        func linear(_ component: Double) -> Double {
+            component <= 0.03928 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+}
+
+private func contrastRatio(_ lhs: Double, _ rhs: Double) -> Double {
+    let lighter = max(lhs, rhs)
+    let darker = min(lhs, rhs)
+    return (lighter + 0.05) / (darker + 0.05)
+}
+
 private extension BrowserDesignContext.ColorInfo {
     var displayValue: String {
         value.cssHexOrOriginal
@@ -394,6 +470,46 @@ private extension String {
     var isTransparentCSS: Bool {
         let lower = trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return lower.isEmpty || lower == "transparent" || lower == "rgba(0, 0, 0, 0)" || lower == "#00000000"
+    }
+
+    var cssColorComponents: CSSColorComponents? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed == "transparent" { return CSSColorComponents(red: 0, green: 0, blue: 0, alpha: 0) }
+        if trimmed.hasPrefix("#") {
+            let hex = String(trimmed.dropFirst())
+            let expanded: String
+            switch hex.count {
+            case 3:
+                expanded = hex.map { "\($0)\($0)" }.joined() + "ff"
+            case 4:
+                expanded = hex.map { "\($0)\($0)" }.joined()
+            case 6:
+                expanded = hex + "ff"
+            case 8:
+                expanded = hex
+            default:
+                return nil
+            }
+            guard let value = UInt64(expanded, radix: 16) else { return nil }
+            return CSSColorComponents(
+                red: Double((value >> 24) & 0xff) / 255,
+                green: Double((value >> 16) & 0xff) / 255,
+                blue: Double((value >> 8) & 0xff) / 255,
+                alpha: Double(value & 0xff) / 255
+            )
+        }
+        guard let range = trimmed.range(of: #"rgba?\(([^\)]+)\)"#, options: .regularExpression) else {
+            return nil
+        }
+        let body = trimmed[range].drop { $0 != "(" }.dropFirst().dropLast()
+        let parts = body.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 3 else { return nil }
+        return CSSColorComponents(
+            red: max(0, min(255, parts[0])) / 255,
+            green: max(0, min(255, parts[1])) / 255,
+            blue: max(0, min(255, parts[2])) / 255,
+            alpha: parts.count >= 4 ? max(0, min(1, parts[3])) : 1
+        )
     }
 }
 

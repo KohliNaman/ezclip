@@ -113,24 +113,45 @@ struct SimpleDetailView: View {
             Spacer()
             HStack(spacing: 8) {
                 if let url = viewModel.capture.url, let nsurl = URL(string: url) {
-                    Button(action: { NSWorkspace.shared.open(nsurl) }) {
-                        Label("Open", systemImage: "safari")
-                    }.buttonStyle(.bordered).controlSize(.small)
-                    Button(action: {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(url, forType: .string)
-                    }) { Label("Copy Link", systemImage: "link") }
-                    .buttonStyle(.bordered).controlSize(.small)
+                    HStack(spacing: 5) {
+                        Button(action: { copyText(url) }) {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy Link")
+                        Text("Link")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(action: { NSWorkspace.shared.open(nsurl) }) {
+                            Image(systemName: "safari")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open Link")
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.quaternary.opacity(0.55))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
-                Button(action: {
-                    NSWorkspace.shared.activateFileViewerSelecting(
-                        [URL(fileURLWithPath: viewModel.capture.screenshotPath)])
-                }) { Label("Finder", systemImage: "folder") }
-                .buttonStyle(.bordered).controlSize(.small)
-                Button(action: {
-                    copyCurrentImage()
-                }) { Label("Copy Image", systemImage: "doc.on.doc") }
-                .buttonStyle(.bordered).controlSize(.small)
+                HStack(spacing: 5) {
+                    Button(action: copyCurrentImage) {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy Image")
+                    Text("Image")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(action: showCurrentInFinder) {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show in Finder")
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.quaternary.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 Button(action: generateAITags) {
                     if isGeneratingAITags || viewModel.currentAIContext?.status == .pending {
                         Label("Tagging", systemImage: "sparkles")
@@ -473,6 +494,23 @@ struct SimpleDetailView: View {
     private func copyCurrentImage() {
         guard let img = ImageStorageManager.shared.fullImage(for: viewModel.capture) else { return }
         ClipboardManager.shared.copyToClipboard(img)
+    }
+
+    private func copyText(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func showCurrentInFinder() {
+        let path: String
+        if viewModel.capture.contextType == .file,
+           let filePath = viewModel.capture.filePath,
+           FileManager.default.fileExists(atPath: filePath) {
+            path = filePath
+        } else {
+            path = viewModel.capture.screenshotPath
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
     private func addTagsFromField() {

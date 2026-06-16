@@ -5,6 +5,7 @@ struct LibraryView: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showingSettings = false
     @State private var bulkTagMode: BulkTagMode?
+    @State private var showingSelectionCollectionSheet = false
     @State private var keyMonitor: Any?
 
     var body: some View {
@@ -97,6 +98,10 @@ struct LibraryView: View {
 
                         if viewModel.isSelectionMode {
                             Menu {
+                                Button("New Collection...") {
+                                    showingSelectionCollectionSheet = true
+                                }
+                                Divider()
                                 ForEach(viewModel.collections) { collection in
                                     Button(collection.name) {
                                         Task { await viewModel.assignSelectedCaptures(to: collection.id) }
@@ -191,6 +196,16 @@ struct LibraryView: View {
                 }
             } onCancel: {
                 bulkTagMode = nil
+            }
+        }
+        .sheet(isPresented: $showingSelectionCollectionSheet) {
+            NewCollectionForSelectionSheet(captureCount: viewModel.selectedCaptureIDs.count) { name in
+                Task {
+                    await viewModel.addCollectionAndAssignSelectedCaptures(name: name)
+                    showingSelectionCollectionSheet = false
+                }
+            } onCancel: {
+                showingSelectionCollectionSheet = false
             }
         }
         .onAppear {
@@ -378,6 +393,43 @@ private struct BulkTagSheet: View {
         let text = tagText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !LibraryViewModel.parseTagInput(text).isEmpty else { return }
         onSubmit(text)
+    }
+}
+
+private struct NewCollectionForSelectionSheet: View {
+    let captureCount: Int
+    let onSubmit: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var collectionName = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New Collection")
+                .font(.headline)
+            Text("Create a collection for \(captureCount) selected captures.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Collection name", text: $collectionName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(submit)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.escape)
+                Button("Create", action: submit)
+                    .keyboardShortcut(.return)
+                    .disabled(collectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
+
+    private func submit() {
+        let name = collectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        onSubmit(name)
     }
 }
 

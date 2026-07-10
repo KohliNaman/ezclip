@@ -34,6 +34,11 @@ struct SettingsView: View {
                     Label("AI", systemImage: "sparkles")
                 }
 
+            browserExtensionsTab
+                .tabItem {
+                    Label("Browsers", systemImage: "puzzlepiece.extension")
+                }
+
             aboutTab
                 .tabItem {
                     Label("About", systemImage: "info.circle")
@@ -47,6 +52,12 @@ struct SettingsView: View {
                 ?? ""
             refreshAppleLocalAvailability()
         }
+    }
+
+    // MARK: - Browser Extensions
+
+    private var browserExtensionsTab: some View {
+        BrowserExtensionsSettingsView()
     }
 
     // MARK: - AI
@@ -363,6 +374,154 @@ struct SettingsView: View {
 
     private func removeLoginItem() {
         print("Login item removal requested")
+    }
+}
+
+private struct BrowserExtensionsSettingsView: View {
+    @State private var health: [BrowserExtensionHealth] = BrowserExtensionDiagnostics.allHealth()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Browser Design Context")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .help("Refresh browser extension status")
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .help("Copy diagnostics")
+            }
+
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(health) { item in
+                        BrowserHealthRow(health: item)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(16)
+        .onAppear(perform: refresh)
+    }
+
+    private func refresh() {
+        health = BrowserExtensionDiagnostics.allHealth()
+    }
+
+    private func copyDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(BrowserExtensionDiagnostics.diagnosticsText(), forType: .string)
+    }
+}
+
+private struct BrowserHealthRow: View {
+    let health: BrowserExtensionHealth
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 9, height: 9)
+                Text(health.target.displayName)
+                    .font(.body.weight(.semibold))
+                Text(health.status.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    revealExtensionFolder()
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.plain)
+                .help("Show extension folder")
+            }
+
+            Text(health.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack(spacing: 6) {
+                BrowserHealthPill(label: "Host", isOK: health.nativeHostInstalled)
+                BrowserHealthPill(label: "Bridge", isOK: health.bridgePathValid)
+                BrowserHealthPill(label: "Extension", isOK: health.extensionInstalled)
+                if let lastPayloadAt = health.lastPayloadAt {
+                    Text(lastPayloadAt.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No payload")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let lastPayloadURL = health.lastPayloadURL {
+                Text(lastPayloadURL)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            if let lastPayloadCounts = health.lastPayloadCounts {
+                Text(lastPayloadCounts)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.32))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var statusColor: Color {
+        switch health.status {
+        case .enriched: .green
+        case .extensionMissing, .nativeHostMissing, .transportFailed: .red
+        case .stalePayload, .urlMismatch, .emptyPayload, .restrictedPage: .yellow
+        }
+    }
+
+    private func revealExtensionFolder() {
+        let folder = health.target.browserFamily == "chromium"
+            ? "BrowserExtensions/chromium"
+            : "BrowserExtensions/firefox"
+        let url = URL(fileURLWithPath: "/Users/namanlol/Development/ezclip").appendingPathComponent(folder)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+}
+
+private struct BrowserHealthPill: View {
+    let label: String
+    let isOK: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isOK ? "checkmark.circle.fill" : "xmark.circle")
+                .font(.caption2)
+            Text(label)
+                .font(.caption2)
+        }
+        .foregroundStyle(isOK ? .green : .red)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(.black.opacity(0.06))
+        .clipShape(Capsule())
     }
 }
 

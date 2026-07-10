@@ -32,7 +32,7 @@ struct LibraryView: View {
                             ForEach(visibleCaptures) { capture in
                                 CaptureCardView(
                                     capture: capture,
-                                    tags: Array(viewModel.captureTagsByCaptureID[capture.id] ?? []).sorted(),
+                                    tags: viewModel.visibleTags(for: capture),
                                     isSelected: viewModel.selectedCaptureIDs.contains(capture.id),
                                     showsSelection: viewModel.isSelectionMode
                                 )

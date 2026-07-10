@@ -1,4 +1,32 @@
 const HOST = "com.namaankohli.ezclip";
+const SOURCE_BROWSER = "chromium";
+const EXTENSION_ID = "aneomelhkigghoclfgmpejhmpgogpfij";
+
+function withMetadata(payload, status = "ok", error = null) {
+  return {
+    ...payload,
+    schemaVersion: 1,
+    sourceBrowser: SOURCE_BROWSER,
+    sourceExtensionId: EXTENSION_ID,
+    extractedAt: new Date().toISOString(),
+    transportStatus: status,
+    transportError: error,
+    counts: {
+      fonts: payload?.fonts?.length || 0,
+      colors: payload?.colors?.length || 0,
+      cssTokens: payload?.cssTokens?.length || 0,
+      buttons: payload?.buttons?.length || 0
+    }
+  };
+}
+
+function sendNative(payload) {
+  chrome.runtime.sendNativeMessage(HOST, payload, () => {
+    if (chrome.runtime.lastError) {
+      console.warn("ezclip native messaging failed:", chrome.runtime.lastError.message);
+    }
+  });
+}
 
 async function captureActiveTab(tabId) {
   if (!tabId) return;
@@ -12,9 +40,21 @@ async function captureActiveTab(tabId) {
       func: () => ezclipExtractDesignContext()
     });
     const payload = context?.result || result?.result;
-    if (payload?.url) chrome.runtime.sendNativeMessage(HOST, payload, () => void chrome.runtime.lastError);
-  } catch (_) {
-    // Restricted browser pages and extension pages are expected to fail.
+    if (payload?.url) sendNative(withMetadata(payload));
+  } catch (error) {
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) return;
+      if (!tab?.url) return;
+      sendNative(withMetadata({
+        url: tab.url,
+        title: tab.title || "",
+        fonts: [],
+        colors: [],
+        cssTokens: [],
+        buttons: [],
+        fontFaceCSS: ""
+      }, "restrictedPage", error?.message || "Extension could not inspect this page."));
+    });
   }
 }
 

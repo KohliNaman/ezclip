@@ -26,6 +26,10 @@ struct Capture: Identifiable, Codable, @unchecked Sendable {
     var designFileName: String?
     var designPageName: String?
     var designContextJSON: String? = nil
+    var designContextStatus: String? = nil
+    var designContextMessage: String? = nil
+    var designContextSource: String? = nil
+    var designContextUpdatedAt: Date? = nil
 
     // Context lifecycle
     var contextStatus: String? = "pending"
@@ -79,5 +83,13 @@ extension Capture: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let parentCaptureId = Column(CodingKeys.parentCaptureId)
         static let collectionId = Column(CodingKeys.collectionId)
         static let contextStatus = Column(CodingKeys.contextStatus)
+        static let designContextStatus = Column(CodingKeys.designContextStatus)
+    }
+}
+
+extension Capture {
+    var designEnrichmentStatus: BrowserDesignEnrichmentStatus? {
+        guard let designContextStatus else { return nil }
+        return BrowserDesignEnrichmentStatus(rawValue: designContextStatus)
     }
 }

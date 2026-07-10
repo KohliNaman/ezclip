@@ -1,6 +1,12 @@
 import Foundation
 
 struct BrowserDesignContext: Codable {
+    var schemaVersion: Int?
+    var sourceBrowser: String?
+    var sourceExtensionId: String?
+    var extractedAt: Date?
+    var transportStatus: String?
+    var transportError: String?
     var url: String?
     var title: String?
     var capturedAt: Date?
@@ -78,6 +84,31 @@ func outputURL() throws -> URL {
     return directory.appendingPathComponent("browser-context-latest.json")
 }
 
+func sourceOutputURL(sourceBrowser: String?) throws -> URL? {
+    guard let sourceBrowser, !sourceBrowser.isEmpty else { return nil }
+    let support = try FileManager.default.url(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask,
+        appropriateFor: nil,
+        create: true
+    )
+    let directory = support
+        .appendingPathComponent("ezclip", isDirectory: true)
+        .appendingPathComponent("browser-contexts", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory.appendingPathComponent("\(sourceBrowser)-latest.json")
+}
+
+func atomicallyWrite(_ data: Data, to destination: URL) throws {
+    let temporary = destination.deletingLastPathComponent()
+        .appendingPathComponent(".\(destination.lastPathComponent)-\(UUID().uuidString)")
+    try data.write(to: temporary, options: .atomic)
+    if FileManager.default.fileExists(atPath: destination.path) {
+        try FileManager.default.removeItem(at: destination)
+    }
+    try FileManager.default.moveItem(at: temporary, to: destination)
+}
+
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -95,13 +126,10 @@ context.capturedAt = Date()
 do {
     let data = try encoder.encode(context)
     let destination = try outputURL()
-    let temporary = destination.deletingLastPathComponent()
-        .appendingPathComponent(".browser-context-\(UUID().uuidString).json")
-    try data.write(to: temporary, options: .atomic)
-    if FileManager.default.fileExists(atPath: destination.path) {
-        try FileManager.default.removeItem(at: destination)
+    try atomicallyWrite(data, to: destination)
+    if let sourceDestination = try sourceOutputURL(sourceBrowser: context.sourceBrowser) {
+        try atomicallyWrite(data, to: sourceDestination)
     }
-    try FileManager.default.moveItem(at: temporary, to: destination)
     writeNativeMessage(["ok": "true"])
 } catch {
     writeNativeMessage(["ok": "false"])

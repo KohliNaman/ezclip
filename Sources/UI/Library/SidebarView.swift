@@ -7,6 +7,10 @@ struct SidebarView: View {
     @State private var tagToRename: Tag?
     @State private var tagRenameText = ""
     @State private var newCollectionName = ""
+    @State private var newCollectionSymbol = "emoji:📁"
+    @State private var collectionToEdit: Collection?
+    @State private var editCollectionName = ""
+    @State private var editCollectionSymbol = ""
 
     var body: some View {
         List {
@@ -41,13 +45,20 @@ struct SidebarView: View {
             // Collections
             Section("Collections") {
                 ForEach(viewModel.collections) { collection in
-                    sidebarButton(
+                    symbolSidebarButton(
                         title: collection.name,
-                        icon: collection.icon,
+                        symbol: collection.collectionSymbol,
                         count: nil,
                         isSelected: viewModel.selectedCollectionId == collection.id
                     ) {
                         viewModel.selectCollection(collection.id)
+                    }
+                    .contextMenu {
+                        Button("Edit") {
+                            collectionToEdit = collection
+                            editCollectionName = collection.name
+                            editCollectionSymbol = collection.collectionSymbol.storageValue
+                        }
                     }
                 }
 
@@ -60,10 +71,10 @@ struct SidebarView: View {
 
             // Popular tags
             Section {
-                ForEach(viewModel.tags.prefix(15)) { tag in
-                    sidebarButton(
+                ForEach(viewModel.visibleSidebarTags.prefix(15)) { tag in
+                    symbolSidebarButton(
                         title: tag.name,
-                        icon: "tag",
+                        symbol: tag.tagSymbol,
                         count: tag.usageCount,
                         isSelected: viewModel.selectedTagName == tag.name
                     ) {
@@ -87,8 +98,8 @@ struct SidebarView: View {
                     }
                 }
 
-                if viewModel.tags.count > 15 {
-                    Text("+\(viewModel.tags.count - 15) more tags")
+                if viewModel.visibleSidebarTags.count > 15 {
+                    Text("+\(viewModel.visibleSidebarTags.count - 15) more tags")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -108,6 +119,8 @@ struct SidebarView: View {
                 Text("New Collection")
                     .font(.headline)
 
+                SymbolPickerSummary(symbolStorageValue: $newCollectionSymbol)
+
                 TextField("Collection name", text: $newCollectionName)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 250)
@@ -117,6 +130,7 @@ struct SidebarView: View {
                     Button("Cancel") {
                         showingNewCollection = false
                         newCollectionName = ""
+                        newCollectionSymbol = "emoji:📁"
                     }
                     .keyboardShortcut(.escape)
 
@@ -128,7 +142,30 @@ struct SidebarView: View {
                 }
             }
             .padding(30)
-            .frame(width: 300, height: 180)
+            .frame(width: 330, height: 250)
+        }
+        .sheet(item: $collectionToEdit) { collection in
+            VStack(spacing: 16) {
+                Text("Edit Collection")
+                    .font(.headline)
+
+                SymbolPickerSummary(symbolStorageValue: $editCollectionSymbol)
+
+                TextField("Collection name", text: $editCollectionName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 250)
+                    .onSubmit { update(collection) }
+
+                HStack {
+                    Button("Cancel") { collectionToEdit = nil }
+                        .keyboardShortcut(.escape)
+                    Button("Save") { update(collection) }
+                        .keyboardShortcut(.return)
+                        .disabled(editCollectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(30)
+            .frame(width: 330, height: 250)
         }
         .sheet(item: $tagToRename) { tag in
             VStack(spacing: 16) {
@@ -187,13 +224,56 @@ struct SidebarView: View {
         .listRowBackground(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
     }
 
+    private func symbolSidebarButton(
+        title: String,
+        symbol: TagSymbol?,
+        count: Int?,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if symbol != nil {
+                    TagSymbolView(symbol: symbol, size: 14)
+                }
+                Text(title)
+                    .lineLimit(1)
+                Spacer()
+                if let count {
+                    Text("\(count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .listRowBackground(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+    }
+
     private func createCollection() {
         let name = newCollectionName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         Task {
-            await viewModel.addCollection(name: name)
+            await viewModel.addCollection(name: name, icon: newCollectionSymbol)
             showingNewCollection = false
             newCollectionName = ""
+            newCollectionSymbol = "emoji:📁"
+        }
+    }
+
+    private func update(_ collection: Collection) {
+        let name = editCollectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task {
+            await viewModel.updateCollection(collection, name: name, symbol: editCollectionSymbol)
+            collectionToEdit = nil
+            editCollectionName = ""
+            editCollectionSymbol = ""
         }
     }
 
@@ -213,6 +293,7 @@ private struct TagManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTagIDs: Set<Tag.ID> = []
     @State private var renameText = ""
+    @State private var symbolText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -230,7 +311,8 @@ private struct TagManagementView: View {
 
             List(viewModel.tags, selection: $selectedTagIDs) { tag in
                 HStack {
-                    Label(tag.name, systemImage: "tag")
+                    TagSymbolView(symbol: tag.tagSymbol, size: 14)
+                    Text(tag.name)
                     Spacer()
                     Text("\(tag.usageCount)")
                         .foregroundStyle(.secondary)
@@ -241,25 +323,34 @@ private struct TagManagementView: View {
             .frame(minHeight: 280)
             .onChange(of: selectedTagIDs) { _, _ in
                 renameText = singleSelectedTag?.name ?? ""
+                symbolText = singleSelectedTag?.tagSymbol?.storageValue ?? ""
             }
 
             if let selectedTag = singleSelectedTag {
-                HStack {
-                    TextField("Rename tag", text: $renameText)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Rename") {
-                        Task {
-                            await viewModel.renameTag(selectedTag, to: renameText)
-                            selectedTagIDs = []
-                            renameText = ""
+                VStack(alignment: .leading, spacing: 10) {
+                    SymbolPickerSummary(symbolStorageValue: $symbolText)
+                    HStack {
+                        TextField("Rename tag", text: $renameText)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Rename") {
+                            Task {
+                                await viewModel.renameTag(selectedTag, to: renameText)
+                                selectedTagIDs = []
+                                renameText = ""
+                                symbolText = ""
+                            }
                         }
-                    }
-                    .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("Delete", role: .destructive) {
-                        Task {
-                            await viewModel.deleteTag(selectedTag)
-                            selectedTagIDs = []
-                            renameText = ""
+                        .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Save Icon") {
+                            Task { await viewModel.updateTagSymbol(selectedTag, symbol: symbolText) }
+                        }
+                        Button("Delete", role: .destructive) {
+                            Task {
+                                await viewModel.deleteTag(selectedTag)
+                                selectedTagIDs = []
+                                renameText = ""
+                                symbolText = ""
+                            }
                         }
                     }
                 }
@@ -307,5 +398,36 @@ private struct TagManagementView: View {
     private var singleSelectedTag: Tag? {
         guard selectedTagIDs.count == 1, let id = selectedTagIDs.first else { return nil }
         return viewModel.tags.first { $0.id == id }
+    }
+}
+
+private struct SymbolPickerSummary: View {
+    @Binding var symbolStorageValue: String
+    @State private var isShowingPicker = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                isShowingPicker.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    TagSymbolView(symbol: TagSymbol(storageValue: symbolStorageValue), size: 18)
+                        .frame(width: 26, height: 26)
+                        .background(.quaternary.opacity(0.45))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    Text("Symbol")
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $isShowingPicker, arrowEdge: .bottom) {
+                SymbolPickerView(symbolStorageValue: $symbolStorageValue)
+            }
+
+            Spacer()
+        }
+        .frame(width: 250)
     }
 }

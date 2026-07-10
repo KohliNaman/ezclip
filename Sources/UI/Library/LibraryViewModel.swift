@@ -129,6 +129,10 @@ final class LibraryViewModel: ObservableObject {
 
     var totalCapturesCount: Int { captures.count }
 
+    var visibleSidebarTags: [Tag] {
+        tags.filter { !TagVisibility.isHiddenInSidebar($0.name, captures: captures) }
+    }
+
     var selectedCollection: Collection? {
         guard let selectedCollectionId else { return nil }
         return collections.first { $0.id == selectedCollectionId }
@@ -283,14 +287,14 @@ final class LibraryViewModel: ObservableObject {
     }
 
     @discardableResult
-    func addCollection(name: String, color: String = "blue", icon: String = "folder") async -> Collection? {
+    func addCollection(name: String, color: String = "blue", icon: String = "emoji:📁") async -> Collection? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var collection = Collection(
             id: UUID(),
             name: trimmed,
             color: color,
-            icon: icon,
+            icon: TagSymbol.normalizedStorageValue(icon) ?? "emoji:📁",
             sortOrder: collections.count
         )
         do {
@@ -355,6 +359,33 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    func updateCollection(_ collection: Collection, name: String, symbol: String?) async {
+        do {
+            try await db.updateCollection(id: collection.id, name: name, symbol: symbol)
+            await loadAll()
+        } catch {
+            print("Failed to update collection: \(error)")
+        }
+    }
+
+    func updateTagSymbol(_ tag: Tag, symbol: String?) async {
+        do {
+            try await db.updateTagSymbol(id: tag.id, symbol: symbol)
+            await loadAll()
+            NotificationCenter.default.post(name: .captureTagsChanged, object: nil)
+        } catch {
+            print("Failed to update tag symbol: \(error)")
+        }
+    }
+
+    func visibleTags(for capture: Capture) -> [Tag] {
+        tagRecords(for: capture).filter { !TagVisibility.isHidden($0.name, for: capture) }
+    }
+
+    func hiddenTags(for capture: Capture) -> [Tag] {
+        tagRecords(for: capture).filter { TagVisibility.isHidden($0.name, for: capture) }
+    }
+
     func toggleSelection(for capture: Capture, in visibleCaptures: [Capture]? = nil, extendRange: Bool = false) {
         if extendRange,
            let visibleCaptures,
@@ -394,6 +425,13 @@ final class LibraryViewModel: ObservableObject {
         captureTagsByCaptureID[capture.id]?.contains { tag in
             tag.localizedCaseInsensitiveContains(query)
         } == true
+    }
+
+    private func tagRecords(for capture: Capture) -> [Tag] {
+        let names = captureTagsByCaptureID[capture.id] ?? []
+        return tags
+            .filter { names.contains($0.name) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private func aiContextMatches(_ capture: Capture, query: String) -> Bool {

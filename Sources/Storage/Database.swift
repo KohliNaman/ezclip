@@ -142,6 +142,33 @@ final class DatabaseManager {
                 """, arguments: [AITaggingStatus.failed.rawValue, "%FOREIGN KEY constraint failed%"])
         }
 
+        migrator.registerMigration("v5_design_context_diagnostics") { db in
+            let existing = try Set(db.columns(in: "capture").map(\.name))
+            try db.alter(table: "capture") { t in
+                if !existing.contains("designContextStatus") {
+                    t.add(column: "designContextStatus", .text)
+                }
+                if !existing.contains("designContextMessage") {
+                    t.add(column: "designContextMessage", .text)
+                }
+                if !existing.contains("designContextSource") {
+                    t.add(column: "designContextSource", .text)
+                }
+                if !existing.contains("designContextUpdatedAt") {
+                    t.add(column: "designContextUpdatedAt", .datetime)
+                }
+            }
+        }
+
+        migrator.registerMigration("v6_tag_symbols") { db in
+            let existing = try Set(db.columns(in: "tag").map(\.name))
+            if !existing.contains("symbol") {
+                try db.alter(table: "tag") { t in
+                    t.add(column: "symbol", .text)
+                }
+            }
+        }
+
         return migrator
     }
 
@@ -196,6 +223,22 @@ final class DatabaseManager {
                 db,
                 sql: """
                 SELECT tag.name
+                FROM tag
+                JOIN captureTag ON captureTag.tagId = tag.id
+                WHERE captureTag.captureId = ?
+                ORDER BY tag.name COLLATE NOCASE
+                """,
+                arguments: [captureId]
+            )
+        }
+    }
+
+    func tags(for captureId: UUID) async throws -> [Tag] {
+        try await read { db in
+            try Tag.fetchAll(
+                db,
+                sql: """
+                SELECT tag.*
                 FROM tag
                 JOIN captureTag ON captureTag.tagId = tag.id
                 WHERE captureTag.captureId = ?
@@ -299,6 +342,25 @@ final class DatabaseManager {
             }
             try Self.recalculateTagUsageCounts(db)
             try Self.deleteUnusedTags(db)
+        }
+    }
+
+    func updateTagSymbol(id: UUID, symbol: String?) async throws {
+        try await write { db in
+            guard var tag = try Tag.fetchOne(db, key: id) else { return }
+            tag.symbol = TagSymbol.normalizedStorageValue(symbol)
+            try tag.update(db)
+        }
+    }
+
+    func updateCollection(id: UUID, name: String, symbol: String?) async throws {
+        try await write { db in
+            guard var collection = try Collection.fetchOne(db, key: id) else { return }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            collection.name = trimmed
+            collection.icon = TagSymbol.normalizedStorageValue(symbol) ?? "emoji:📁"
+            try collection.update(db)
         }
     }
 

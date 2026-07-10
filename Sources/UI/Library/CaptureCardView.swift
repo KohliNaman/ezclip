@@ -10,7 +10,7 @@ private final class ThumbnailLoadResult: @unchecked Sendable {
 
 struct CaptureCardView: View {
     let capture: Capture
-    var tags: [String] = []
+    var tags: [Tag] = []
     var isSelected: Bool = false
     var showsSelection: Bool = false
     @State private var thumbnail: NSImage?
@@ -99,6 +99,21 @@ struct CaptureCardView: View {
                 .background(.quaternary.opacity(0.5))
                 .cornerRadius(3)
 
+                if capture.contextType == .website {
+                    HStack(spacing: 4) {
+                        Image(systemName: designStatusIcon)
+                            .font(.system(size: 8, weight: .semibold))
+                        Text(designStatusLabel)
+                            .font(.system(size: 9, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(designStatusColor)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(designStatusColor.opacity(0.12))
+                    .clipShape(Capsule())
+                }
+
                 // App + time
                 HStack {
                     Text(capture.appName)
@@ -113,13 +128,16 @@ struct CaptureCardView: View {
                 if !tags.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(tags.prefix(2), id: \.self) { tag in
-                            Text(tag)
-                                .font(.system(size: 9))
-                                .lineLimit(1)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(.quaternary.opacity(0.65))
-                                .clipShape(Capsule())
+                            HStack(spacing: 3) {
+                                TagSymbolView(symbol: tag.tagSymbol, size: 10)
+                                Text(tag.name)
+                                    .font(.system(size: 9))
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(.quaternary.opacity(0.65))
+                            .clipShape(Capsule())
                         }
                         if tags.count > 2 {
                             Text("+\(tags.count - 2)")
@@ -154,5 +172,18 @@ struct CaptureCardView: View {
             thumbnail = nil
             didFinishLoading = false
         }
+    }
+
+    private var designStatusLabel: String {
+        if capture.designContextJSON != nil { return "Design" }
+        return capture.designEnrichmentStatus?.displayName ?? "No design context"
+    }
+
+    private var designStatusIcon: String {
+        capture.designContextJSON == nil ? "exclamationmark.triangle.fill" : "paintpalette.fill"
+    }
+
+    private var designStatusColor: Color {
+        capture.designContextJSON == nil ? .yellow : .green
     }
 }

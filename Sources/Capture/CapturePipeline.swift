@@ -74,7 +74,15 @@ final class CapturePipeline {
         )
         var enrichedContext = context
         if enrichedContext.contextType == .website {
-            enrichedContext.designContextJSON = BrowserDesignContextStore.latestJSON(matching: enrichedContext.url)
+            let designMatch = BrowserDesignContextStore.latestMatch(
+                matching: enrichedContext.url,
+                bundleId: windowInfo.bundleId
+            )
+            enrichedContext.designContextJSON = designMatch.json
+            enrichedContext.designContextStatus = designMatch.status
+            enrichedContext.designContextMessage = designMatch.message
+            enrichedContext.designContextSource = designMatch.sourceBrowser
+            enrichedContext.designContextUpdatedAt = designMatch.updatedAt
         }
 
         do {

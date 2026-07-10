@@ -96,6 +96,7 @@ final class DetailViewModel: ObservableObject {
     @Published private(set) var captures: [Capture]
     @Published var currentIndex: Int
     @Published var currentTags: [String] = []
+    @Published var currentTagRecords: [Tag] = []
     @Published var currentAIContext: CaptureAIContext?
     @Published var tagError: String?
 
@@ -145,9 +146,11 @@ final class DetailViewModel: ObservableObject {
     func loadCurrentTags() async {
         guard currentIndex >= 0, currentIndex < captures.count else { return }
         do {
-            currentTags = try await DatabaseManager.shared.tagNames(for: capture.id)
+            currentTagRecords = try await DatabaseManager.shared.tags(for: capture.id)
+            currentTags = currentTagRecords.map(\.name)
         } catch {
             print("Failed to load tags: \(error)")
+            currentTagRecords = []
             currentTags = []
         }
     }
@@ -181,6 +184,36 @@ final class DetailViewModel: ObservableObject {
         guard currentIndex >= 0, currentIndex < captures.count else { return }
         await AITaggingService.shared.generateTags(for: capture)
         await loadCurrentMetadata()
+    }
+
+    func retryDesignEnrichment() async {
+        guard currentIndex >= 0, currentIndex < captures.count else { return }
+        let match = BrowserDesignContextStore.latestMatch(
+            matching: capture.url,
+            bundleId: capture.appBundleId
+        )
+        let captureId = capture.id
+
+        do {
+            let refreshed = try await DatabaseManager.shared.write { db -> Capture? in
+                guard var updated = try Capture.fetchOne(db, key: captureId) else { return nil }
+                if let json = match.json {
+                    updated.designContextJSON = json
+                }
+                updated.designContextStatus = match.status.rawValue
+                updated.designContextMessage = match.message
+                updated.designContextSource = match.sourceBrowser
+                updated.designContextUpdatedAt = match.updatedAt ?? Date()
+                try updated.update(db)
+                return updated
+            }
+            if let refreshed {
+                captures[currentIndex] = refreshed
+                NotificationCenter.default.post(name: .newCaptureCreated, object: refreshed)
+            }
+        } catch {
+            print("Failed to retry design enrichment: \(error)")
+        }
     }
 
     private func setTags(_ tags: [String]) async {

@@ -38,6 +38,10 @@ final class CaptureRepository {
             if let designContextJSON = context.designContextJSON {
                 capture.designContextJSON = designContextJSON
             }
+            capture.designContextStatus = context.designContextStatus?.rawValue
+            capture.designContextMessage = context.designContextMessage
+            capture.designContextSource = context.designContextSource
+            capture.designContextUpdatedAt = context.designContextUpdatedAt
             capture.filePath = context.filePath
             capture.contextStatus = "resolved"
 

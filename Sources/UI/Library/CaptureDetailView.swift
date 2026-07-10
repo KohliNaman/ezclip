@@ -18,6 +18,7 @@ struct SimpleDetailView: View {
     @State private var zoomScale: CGFloat = 1.0
     @State private var activeMagnification: CGFloat = 1.0
     @State private var isGeneratingAITags = false
+    @State private var isRetryingDesignContext = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +35,8 @@ struct SimpleDetailView: View {
                     contextSection
                     if let designContext = BrowserDesignContextStore.decode(viewModel.capture.designContextJSON) {
                         designContextSection(designContext)
+                    } else if viewModel.capture.contextType == .website {
+                        designContextMissingSection
                     }
                     tagsSection
                     notesSection
@@ -324,6 +327,86 @@ struct SimpleDetailView: View {
         .cornerRadius(10)
     }
 
+    private var designContextMissingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "puzzlepiece.extension")
+                    .foregroundStyle(designContextStatusColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(designContextStatusTitle)
+                        .font(.headline)
+                    Text(viewModel.capture.designContextMessage ?? "ezclip saved the screenshot and link, but no browser design context was attached.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    retryDesignEnrichment()
+                } label: {
+                    if isRetryingDesignContext {
+                        Label("Retrying", systemImage: "arrow.clockwise")
+                    } else {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isRetryingDesignContext)
+
+                Button {
+                    copyText(BrowserExtensionDiagnostics.diagnosticsText())
+                } label: {
+                    Label("Diagnostics", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                if let source = viewModel.capture.designContextSource {
+                    Text(source)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                if let updatedAt = viewModel.capture.designContextUpdatedAt {
+                    Text(updatedAt.formatted(date: .omitted, time: .shortened))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .background(.yellow.opacity(0.12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(.yellow.opacity(0.35), lineWidth: 0.5)
+        )
+        .cornerRadius(10)
+    }
+
+    private var designContextStatusTitle: String {
+        viewModel.capture.designEnrichmentStatus?.displayName ?? "Design context missing"
+    }
+
+    private var designContextStatusColor: Color {
+        switch viewModel.capture.designEnrichmentStatus {
+        case .enriched: .green
+        case .nativeHostMissing, .extensionMissing, .transportFailed: .red
+        case .stalePayload, .urlMismatch, .emptyPayload, .restrictedPage, .none: .yellow
+        }
+    }
+
+    private func retryDesignEnrichment() {
+        guard !isRetryingDesignContext else { return }
+        isRetryingDesignContext = true
+        Task {
+            await viewModel.retryDesignEnrichment()
+            isRetryingDesignContext = false
+        }
+    }
+
     // MARK: - Tags
 
     private var tagsSection: some View {
@@ -336,15 +419,17 @@ struct SimpleDetailView: View {
                 aiStatusView
             }
 
-            if !viewModel.currentTags.isEmpty {
+            let visibleTags = visibleTagRecords
+            if !visibleTags.isEmpty {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 8) {
-                    ForEach(viewModel.currentTags, id: \.self) { tag in
+                    ForEach(visibleTags, id: \.self) { tag in
                         HStack(spacing: 6) {
-                            Text(tag)
+                            TagSymbolView(symbol: tag.tagSymbol, size: 12)
+                            Text(tag.name)
                                 .font(.caption)
                                 .lineLimit(1)
                             Button {
-                                Task { await viewModel.removeTag(tag) }
+                                Task { await viewModel.removeTag(tag.name) }
                             } label: {
                                 Image(systemName: "xmark")
                                     .font(.caption2.weight(.bold))
@@ -358,6 +443,27 @@ struct SimpleDetailView: View {
                         .clipShape(Capsule())
                     }
                 }
+            }
+
+            let hiddenTags = hiddenTagRecords
+            if !hiddenTags.isEmpty {
+                DisclosureGroup("Hidden search metadata") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 8) {
+                        ForEach(hiddenTags, id: \.self) { tag in
+                            Text(tag.name)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary.opacity(0.35))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
@@ -410,6 +516,14 @@ struct SimpleDetailView: View {
                 .foregroundStyle(.secondary)
                 .help(viewModel.currentAIContext?.error ?? "AI tagging was skipped")
         }
+    }
+
+    private var visibleTagRecords: [Tag] {
+        viewModel.currentTagRecords.filter { !TagVisibility.isHidden($0.name, for: viewModel.capture) }
+    }
+
+    private var hiddenTagRecords: [Tag] {
+        viewModel.currentTagRecords.filter { TagVisibility.isHidden($0.name, for: viewModel.capture) }
     }
 
     private var aiStatusMessage: String? {

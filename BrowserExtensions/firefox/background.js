@@ -1,14 +1,56 @@
 const HOST = "com.namaankohli.ezclip";
 const api = typeof browser !== "undefined" ? browser : chrome;
+const SOURCE_BROWSER = "firefox";
+const EXTENSION_ID = "ezclip-design-context@namaankohli.com";
+
+function withMetadata(payload, status = "ok", error = null) {
+  return {
+    ...payload,
+    schemaVersion: 1,
+    sourceBrowser: SOURCE_BROWSER,
+    sourceExtensionId: EXTENSION_ID,
+    extractedAt: new Date().toISOString(),
+    transportStatus: status,
+    transportError: error,
+    counts: {
+      fonts: payload?.fonts?.length || 0,
+      colors: payload?.colors?.length || 0,
+      cssTokens: payload?.cssTokens?.length || 0,
+      buttons: payload?.buttons?.length || 0
+    }
+  };
+}
+
+async function sendNative(payload) {
+  try {
+    await api.runtime.sendNativeMessage(HOST, payload);
+  } catch (error) {
+    console.warn("ezclip native messaging failed:", error?.message || error);
+  }
+}
 
 async function captureActiveTab(tabId) {
   if (!tabId) return;
   try {
     await api.tabs.executeScript(tabId, { file: "extractor.js" });
     const [payload] = await api.tabs.executeScript(tabId, { code: "ezclipExtractDesignContext();" });
-    if (payload?.url) api.runtime.sendNativeMessage(HOST, payload).catch(() => {});
-  } catch (_) {
-    // Restricted browser pages and extension pages are expected to fail.
+    if (payload?.url) await sendNative(withMetadata(payload));
+  } catch (error) {
+    try {
+      const tab = await api.tabs.get(tabId);
+      if (!tab?.url) return;
+      await sendNative(withMetadata({
+        url: tab.url,
+        title: tab.title || "",
+        fonts: [],
+        colors: [],
+        cssTokens: [],
+        buttons: [],
+        fontFaceCSS: ""
+      }, "restrictedPage", error?.message || "Extension could not inspect this page."));
+    } catch (_) {
+      // Browser pages can hide tab details as well.
+    }
   }
 }
 

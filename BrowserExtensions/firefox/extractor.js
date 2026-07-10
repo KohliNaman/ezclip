@@ -2,7 +2,7 @@ function ezclipExtractDesignContext() {
   const visible = (el) => {
     const rect = el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
-    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity || "1") > 0.02;
   };
 
   const selectorFor = (el) => {
@@ -124,25 +124,33 @@ function ezclipExtractDesignContext() {
 
   const buttonText = (el) => {
     const tag = el.tagName.toLowerCase();
-    if (tag === "input") return (el.value || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ");
-    return (el.innerText || el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ");
+    const label = el.getAttribute("aria-label") || el.getAttribute("title") || "";
+    if (tag === "input") return (el.value || label).trim().replace(/\s+/g, " ");
+    return (el.innerText || el.textContent || label).trim().replace(/\s+/g, " ");
   };
 
   const buttonCandidates = [
-    ...document.querySelectorAll("button,[role='button'],a[href],input[type='button'],input[type='submit']")
+    ...document.querySelectorAll("button,[role='button'],a[href],input[type='button'],input[type='submit'],[onclick],[tabindex]")
   ].filter((el) => {
     if (!visible(el)) return false;
     const rect = el.getBoundingClientRect();
     const text = buttonText(el);
-    if (text.length < 2 || text.length > 48) return false;
-    if (rect.width < 16 || rect.height < 24 || rect.width > 640 || rect.height > 220) return false;
-    if (rect.height / rect.width > 1.4 || rect.width / rect.height > 10) return false;
+    if (text.length < 1 || text.length > 72) return false;
+    if (rect.width < 12 || rect.height < 12 || rect.width > 820 || rect.height > 260) return false;
+    if (rect.height / Math.max(rect.width, 1) > 3.2 || rect.width / Math.max(rect.height, 1) > 18) return false;
     const style = window.getComputedStyle(el);
     const tag = el.tagName.toLowerCase();
     const hasButtonSignal = tag === "button" || tag === "input" || el.getAttribute("role") === "button" ||
+      el.hasAttribute("onclick") || el.getAttribute("tabindex") === "0" ||
       style.backgroundColor !== "rgba(0, 0, 0, 0)" || style.backgroundImage !== "none" ||
       parseFloat(style.borderTopWidth) > 0 || parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) > 16;
     return hasButtonSignal;
+  }).sort((a, b) => {
+    const ar = a.getBoundingClientRect();
+    const br = b.getBoundingClientRect();
+    const aScore = (ar.width * ar.height) + (ar.top >= 0 && ar.top < window.innerHeight ? 2000 : 0);
+    const bScore = (br.width * br.height) + (br.top >= 0 && br.top < window.innerHeight ? 2000 : 0);
+    return bScore - aScore;
   });
 
   const buttons = [];

@@ -11,6 +11,9 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: 6.29.0
+  PhosphorSwift:
+    url: https://github.com/phosphor-icons/swift
+    from: 2.1.0
 
 targets:
   ezclip:
@@ -24,6 +27,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: GRDB
+      - package: PhosphorSwift
       - target: ezclip-bridge
     settings:
       base:

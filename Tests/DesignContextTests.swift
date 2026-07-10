@@ -84,15 +84,73 @@ final class DesignContextTests: XCTestCase {
         XCTAssertNil(json)
     }
 
+    func testLatestMatchReportsURLMismatch() throws {
+        let data = try designContextData(
+            url: "https://example.com/pricing",
+            capturedAt: "2026-06-12T12:00:00Z"
+        )
+
+        let match = BrowserDesignContextStore.latestMatch(
+            from: data,
+            matching: "https://other.example/features",
+            now: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-06-12T12:00:30Z"))
+        )
+
+        XCTAssertNil(match.json)
+        XCTAssertEqual(match.status, .urlMismatch)
+    }
+
+    func testLatestMatchReportsRestrictedPage() throws {
+        let json = """
+        {
+          "url": "chrome://extensions",
+          "title": "Extensions",
+          "capturedAt": "2026-06-12T12:00:00Z",
+          "transportStatus": "restrictedPage",
+          "transportError": "Cannot access browser page",
+          "fonts": [],
+          "colors": [],
+          "cssTokens": [],
+          "buttons": []
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+
+        let match = BrowserDesignContextStore.latestMatch(
+            from: data,
+            matching: "chrome://extensions",
+            now: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-06-12T12:00:30Z"))
+        )
+
+        XCTAssertNil(match.json)
+        XCTAssertEqual(match.status, .restrictedPage)
+        XCTAssertTrue(match.message.contains("Cannot access"))
+    }
+
+    func testManifestPayloadUsesExpectedBrowserKeys() throws {
+        let chrome = try XCTUnwrap(BrowserExtensionInstaller.manifestTargets.first { $0.sourceBrowser == "chrome" })
+        let firefox = try XCTUnwrap(BrowserExtensionInstaller.manifestTargets.first { $0.sourceBrowser == "firefox" })
+
+        let chromePayload = BrowserExtensionInstaller.manifestPayload(for: chrome, bridgePath: "/tmp/bridge")
+        let firefoxPayload = BrowserExtensionInstaller.manifestPayload(for: firefox, bridgePath: "/tmp/bridge")
+
+        XCTAssertEqual(chromePayload["name"] as? String, BrowserExtensionInstaller.hostName)
+        XCTAssertEqual(chromePayload["allowed_origins"] as? [String], ["chrome-extension://aneomelhkigghoclfgmpejhmpgogpfij/"])
+        XCTAssertNil(chromePayload["allowed_extensions"])
+        XCTAssertEqual(firefoxPayload["allowed_extensions"] as? [String], ["ezclip-design-context@namaankohli.com"])
+        XCTAssertNil(firefoxPayload["allowed_origins"])
+    }
+
     private func designContextData(url: String, capturedAt: String) throws -> Data {
         let json = """
         {
           "url": "\(url)",
           "title": "Example",
           "capturedAt": "\(capturedAt)",
+          "sourceBrowser": "chrome",
           "fonts": [],
           "colors": [],
-          "cssTokens": [],
+          "cssTokens": [{"name": "--space", "value": "8px"}],
           "buttons": [],
           "fontFaceCSS": "@font-face { font-family: Example; src: url(https://example.com/example.woff2); }"
         }

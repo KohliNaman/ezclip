@@ -22,6 +22,10 @@ struct ResolvedContext: Sendable {
     var designFileName: String?
     var designPageName: String?
     var designContextJSON: String?
+    var designContextStatus: BrowserDesignEnrichmentStatus?
+    var designContextMessage: String?
+    var designContextSource: String?
+    var designContextUpdatedAt: Date?
     var filePath: String?
     var browserName: String?
 }

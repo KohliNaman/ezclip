@@ -5,6 +5,11 @@ struct Tag: Identifiable, Codable, Hashable, @unchecked Sendable {
     var id: UUID
     var name: String
     var usageCount: Int
+    var symbol: String? = nil
+
+    var tagSymbol: TagSymbol? {
+        TagSymbol(storageValue: symbol)
+    }
 }
 
 extension Tag: TableRecord, FetchableRecord, MutablePersistableRecord {
@@ -12,6 +17,7 @@ extension Tag: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let id = Column(CodingKeys.id)
         static let name = Column(CodingKeys.name)
         static let usageCount = Column(CodingKeys.usageCount)
+        static let symbol = Column(CodingKeys.symbol)
     }
 }
 

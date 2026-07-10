@@ -10,6 +10,31 @@ final class AITaggingTests: XCTestCase {
         )
     }
 
+    func testTagSymbolParsesEmojiAndPhosphorStorageValues() {
+        let phosphor = TagSymbol(storageValue: "phosphor:briefcase")
+        XCTAssertEqual(phosphor?.kind, .phosphor)
+        XCTAssertEqual(phosphor?.value, "briefcase")
+        XCTAssertEqual(phosphor?.storageValue, "phosphor:briefcase")
+
+        let emoji = TagSymbol(storageValue: "emoji:🚀")
+        XCTAssertEqual(emoji?.kind, .emoji)
+        XCTAssertEqual(emoji?.value, "🚀")
+        XCTAssertEqual(emoji?.storageValue, "emoji:🚀")
+    }
+
+    func testLegacyCollectionIconFallsBackToPhosphorFolder() {
+        let collection = Collection(
+            id: UUID(),
+            name: "Legacy",
+            color: "blue",
+            icon: "folder",
+            sortOrder: 0
+        )
+
+        XCTAssertEqual(collection.collectionSymbol.kind, .phosphor)
+        XCTAssertEqual(collection.collectionSymbol.value, PhosphorTagIcon.folder.rawValue)
+    }
+
     func testAIContextEncodesAndDecodesSearchTags() {
         let context = CaptureAIContext(
             captureId: UUID(),
@@ -49,6 +74,43 @@ final class AITaggingTests: XCTestCase {
 
         XCTAssertTrue(tags.contains("youtube"))
         XCTAssertFalse(tags.contains("youtube.com"))
+    }
+
+    func testBrowserAndSiteTagsAreHiddenButSearchable() {
+        var capture = Capture(
+            id: UUID(),
+            timestamp: Date(),
+            appName: "Zen",
+            appBundleId: "app.zen-browser.zen",
+            windowTitle: "Video - YouTube",
+            screenshotPath: "/tmp/example.png",
+            thumbnailPath: "/tmp/example_thumb.png",
+            contextType: .website,
+            notes: nil,
+            collectionId: nil,
+            isScrolling: false,
+            scrollIndex: nil,
+            parentCaptureId: nil
+        )
+        capture.url = "https://www.youtube.com/watch?v=abc"
+
+        XCTAssertTrue(TagVisibility.isHidden("website", for: capture))
+        XCTAssertTrue(TagVisibility.isHidden("zen", for: capture))
+        XCTAssertTrue(TagVisibility.isHidden("youtube", for: capture))
+        XCTAssertFalse(TagVisibility.isHidden("card grid", for: capture))
+
+        let viewModel = LibraryViewModel()
+        viewModel.captures = [capture]
+        viewModel.tags = [
+            Tag(id: UUID(), name: "website", usageCount: 1),
+            Tag(id: UUID(), name: "youtube", usageCount: 1),
+            Tag(id: UUID(), name: "card grid", usageCount: 1)
+        ]
+        viewModel.captureTagsByCaptureID = [capture.id: ["website", "youtube", "card grid"]]
+
+        XCTAssertEqual(viewModel.visibleTags(for: capture).map(\.name), ["card grid"])
+        viewModel.searchText = "youtube"
+        XCTAssertEqual(viewModel.filteredCaptures.map(\.id), [capture.id])
     }
 
     func testPromptIncludesDesignerSpecificInstructionsAndContext() {

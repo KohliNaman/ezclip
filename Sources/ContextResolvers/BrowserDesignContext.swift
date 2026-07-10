@@ -1,6 +1,12 @@
 import Foundation
 
 struct BrowserDesignContext: Codable, Sendable {
+    var schemaVersion: Int?
+    var sourceBrowser: String?
+    var sourceExtensionId: String?
+    var extractedAt: Date?
+    var transportStatus: String?
+    var transportError: String?
     var url: String?
     var title: String?
     var capturedAt: Date?
@@ -53,6 +59,40 @@ struct BrowserDesignContext: Codable, Sendable {
     }
 }
 
+enum BrowserDesignEnrichmentStatus: String, Codable, Sendable, CaseIterable {
+    case enriched
+    case extensionMissing
+    case nativeHostMissing
+    case stalePayload
+    case urlMismatch
+    case emptyPayload
+    case restrictedPage
+    case transportFailed
+
+    var displayName: String {
+        switch self {
+        case .enriched: "Design context ready"
+        case .extensionMissing: "Extension missing"
+        case .nativeHostMissing: "Native host missing"
+        case .stalePayload: "Extension data stale"
+        case .urlMismatch: "Extension data from another page"
+        case .emptyPayload: "No design data found"
+        case .restrictedPage: "Browser blocked this page"
+        case .transportFailed: "Extension connection failed"
+        }
+    }
+
+    var isMissing: Bool { self != .enriched }
+}
+
+struct BrowserDesignContextMatch: Sendable {
+    var json: String?
+    var status: BrowserDesignEnrichmentStatus
+    var message: String
+    var sourceBrowser: String?
+    var updatedAt: Date?
+}
+
 enum BrowserDesignContextStore {
     private static let maxExactURLAge: TimeInterval = 10 * 60
     private static let maxHostAge: TimeInterval = 2 * 60
@@ -69,34 +109,180 @@ enum BrowserDesignContextStore {
             .appendingPathComponent("browser-context-latest.json")
     }
 
-    static func latestJSON(matching url: String?) -> String? {
-        guard let latestContextURL,
-              let data = try? Data(contentsOf: latestContextURL),
-              data.count < 750_000
-        else { return nil }
+    static var recordsDirectoryURL: URL? {
+        guard let support = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else { return nil }
+        return support
+            .appendingPathComponent("ezclip", isDirectory: true)
+            .appendingPathComponent("browser-contexts", isDirectory: true)
+    }
 
-        return latestJSON(from: data, matching: url)
+    static func latestJSON(matching url: String?) -> String? {
+        latestMatch(matching: url, bundleId: nil).json
+    }
+
+    static func latestMatch(matching url: String?, bundleId: String?, now: Date = Date()) -> BrowserDesignContextMatch {
+        let source = sourceBrowser(for: bundleId)
+        let payloads = candidatePayloads(sourceBrowser: source)
+        guard !payloads.isEmpty else {
+            let health = BrowserExtensionDiagnostics.health(for: bundleId)
+            return BrowserDesignContextMatch(
+                json: nil,
+                status: health.status,
+                message: health.message,
+                sourceBrowser: source,
+                updatedAt: nil
+            )
+        }
+
+        let matches = payloads.map { payload in
+            match(data: payload.data, requestedURL: url, now: now, fileModifiedAt: payload.modifiedAt)
+        }
+        if let enriched = matches.first(where: { $0.status == .enriched }) {
+            return enriched
+        }
+        return matches.first ?? BrowserDesignContextMatch(
+            json: nil,
+            status: .emptyPayload,
+            message: "No browser design context payload could be decoded.",
+            sourceBrowser: source,
+            updatedAt: nil
+        )
     }
 
     static func latestJSON(from data: Data, matching url: String?, now: Date = Date()) -> String? {
-        guard data.count < 750_000,
-              let context = try? JSONDecoder.ezclip.decode(BrowserDesignContext.self, from: data)
-        else { return nil }
+        match(data: data, requestedURL: url, now: now, fileModifiedAt: nil).json
+    }
 
-        if let url, let contextURL = context.url,
-           normalizedURL(url) != normalizedURL(contextURL) {
-            guard sameHost(url, contextURL),
-                  isFresh(context, maxAge: maxHostAge, now: now) else { return nil }
-        } else if !isFresh(context, maxAge: maxExactURLAge, now: now) {
-            return nil
-        }
-
-        return String(data: data, encoding: .utf8)
+    static func latestMatch(from data: Data, matching url: String?, now: Date = Date()) -> BrowserDesignContextMatch {
+        match(data: data, requestedURL: url, now: now, fileModifiedAt: nil)
     }
 
     static func decode(_ json: String?) -> BrowserDesignContext? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder.ezclip.decode(BrowserDesignContext.self, from: data)
+    }
+
+    static func sourceBrowser(for bundleId: String?) -> String? {
+        switch bundleId {
+        case "com.google.Chrome": "chrome"
+        case "net.imput.helium": "helium"
+        case "org.mozilla.firefox": "firefox"
+        case "app.zen-browser.zen": "zen"
+        default: nil
+        }
+    }
+
+    private static func candidatePayloads(sourceBrowser: String?) -> [(data: Data, modifiedAt: Date?)] {
+        var urls: [URL] = []
+        if let sourceBrowser, let recordsDirectoryURL {
+            urls.append(recordsDirectoryURL.appendingPathComponent("\(sourceBrowser)-latest.json"))
+            switch sourceBrowser {
+            case "chrome", "helium":
+                urls.append(recordsDirectoryURL.appendingPathComponent("chromium-latest.json"))
+            case "firefox", "zen":
+                urls.append(recordsDirectoryURL.appendingPathComponent("firefox-latest.json"))
+            default:
+                break
+            }
+        }
+        if let latestContextURL {
+            urls.append(latestContextURL)
+        }
+
+        return urls.compactMap { url in
+            guard let data = try? Data(contentsOf: url), data.count < 750_000 else { return nil }
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            return (data, modified)
+        }
+    }
+
+    private static func match(
+        data: Data,
+        requestedURL url: String?,
+        now: Date,
+        fileModifiedAt: Date?
+    ) -> BrowserDesignContextMatch {
+        guard data.count < 750_000,
+              let context = try? JSONDecoder.ezclip.decode(BrowserDesignContext.self, from: data)
+        else {
+            return BrowserDesignContextMatch(
+                json: nil,
+                status: .emptyPayload,
+                message: "The browser payload was empty, too large, or invalid.",
+                sourceBrowser: nil,
+                updatedAt: fileModifiedAt
+            )
+        }
+
+        let updatedAt = context.capturedAt ?? context.extractedAt ?? fileModifiedAt
+        if context.transportStatus == BrowserDesignEnrichmentStatus.restrictedPage.rawValue {
+            return BrowserDesignContextMatch(
+                json: nil,
+                status: .restrictedPage,
+                message: context.transportError ?? "The browser blocked extension access to this page.",
+                sourceBrowser: context.sourceBrowser,
+                updatedAt: updatedAt
+            )
+        }
+        if context.transportStatus == BrowserDesignEnrichmentStatus.transportFailed.rawValue {
+            return BrowserDesignContextMatch(
+                json: nil,
+                status: .transportFailed,
+                message: context.transportError ?? "The extension could not send design context to ezclip.",
+                sourceBrowser: context.sourceBrowser,
+                updatedAt: updatedAt
+            )
+        }
+
+        if let url, let contextURL = context.url,
+           normalizedURL(url) != normalizedURL(contextURL) {
+            let sameHost = sameHost(url, contextURL)
+            guard sameHost, isFresh(context, maxAge: maxHostAge, now: now) else {
+                return BrowserDesignContextMatch(
+                    json: nil,
+                    status: sameHost ? .stalePayload : .urlMismatch,
+                    message: sameHost
+                        ? "The latest extension data is older than the same-host fallback window."
+                        : "The latest extension data came from \(contextURL), not this capture.",
+                    sourceBrowser: context.sourceBrowser,
+                    updatedAt: updatedAt
+                )
+            }
+        } else if !isFresh(context, maxAge: maxExactURLAge, now: now) {
+            return BrowserDesignContextMatch(
+                json: nil,
+                status: .stalePayload,
+                message: "The latest extension data is too old for this capture.",
+                sourceBrowser: context.sourceBrowser,
+                updatedAt: updatedAt
+            )
+        }
+
+        let hasDesignData = !context.fonts.isEmpty || !context.colors.isEmpty ||
+            !context.cssTokens.isEmpty || !context.buttons.isEmpty ||
+            !(context.fontFaceCSS?.isEmpty ?? true)
+        guard hasDesignData else {
+            return BrowserDesignContextMatch(
+                json: nil,
+                status: .emptyPayload,
+                message: "The extension ran, but did not find fonts, colors, CSS tokens, or buttons.",
+                sourceBrowser: context.sourceBrowser,
+                updatedAt: updatedAt
+            )
+        }
+
+        return BrowserDesignContextMatch(
+            json: String(data: data, encoding: .utf8),
+            status: .enriched,
+            message: "Design context matched this capture.",
+            sourceBrowser: context.sourceBrowser,
+            updatedAt: updatedAt
+        )
     }
 
     private static func normalizedURL(_ value: String) -> String {

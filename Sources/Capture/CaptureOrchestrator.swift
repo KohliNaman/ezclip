@@ -59,28 +59,8 @@ final class CaptureOrchestrator {
     }
 
     func delete(_ capture: Capture) async throws {
-        do {
-            try storage.deleteImages(for: capture)
-        } catch {
-            print("⚠️ Deleted capture row after image cleanup warning: \(error.localizedDescription)")
-        }
-
-        try await db.write { [self] db in
-            if capture.isScrolling {
-                let children = try Capture
-                    .filter(sql: "parentCaptureId = ?", arguments: [capture.id.uuidString])
-                    .fetchAll(db)
-                for child in children {
-                    do {
-                        try storage.deleteImages(for: child)
-                    } catch {
-                        print("⚠️ Deleted child capture row after image cleanup warning: \(error.localizedDescription)")
-                    }
-                    try child.delete(db)
-                }
-            }
-            try capture.delete(db)
-        }
+        try await db.deleteCaptureAndEnqueueFiles(id: capture.id)
+        await CaptureStorageActor.shared.drainDeletionQueue()
         NotificationCenter.default.post(name: .captureDeleted, object: capture.id)
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SidebarView: View {
-    @EnvironmentObject var viewModel: LibraryViewModel
+    @Environment(LibraryViewModel.self) private var viewModel
     @State private var showingNewCollection = false
     @State private var showingTagManager = false
     @State private var tagToRename: Tag?
@@ -188,7 +188,7 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showingTagManager) {
             TagManagementView()
-                .environmentObject(viewModel)
+                .environment(viewModel)
         }
     }
 
@@ -289,7 +289,7 @@ struct SidebarView: View {
 }
 
 private struct TagManagementView: View {
-    @EnvironmentObject var viewModel: LibraryViewModel
+    @Environment(LibraryViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTagIDs: Set<Tag.ID> = []
     @State private var renameText = ""

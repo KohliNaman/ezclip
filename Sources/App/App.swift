@@ -3,12 +3,12 @@ import SwiftUI
 @main
 struct EzclipApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var libraryViewModel: LibraryViewModel = .init()
+    @State private var libraryViewModel: LibraryViewModel = .init()
 
     var body: some Scene {
         Window("ezclip", id: "main") {
             LibraryView()
-                .environmentObject(libraryViewModel)
+                .environment(libraryViewModel)
                 .frame(minWidth: 800, minHeight: 500)
         }
         .windowStyle(.hiddenTitleBar)
@@ -25,7 +25,7 @@ struct EzclipApp: App {
 
         Settings {
             SettingsView()
-                .environmentObject(libraryViewModel)
+                .environment(libraryViewModel)
         }
     }
 }

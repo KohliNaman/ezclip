@@ -39,8 +39,11 @@ final class ScrollingCaptureManager {
             try await Task.sleep(nanoseconds: 600_000_000)  // 600ms
 
             // Capture
-            let (image, _) = try await captureManager.captureFrontmostWindow()
-            images.append(image)
+            let (image, info) = try await captureManager.captureFrontmostWindow()
+            images.append(NSImage(
+                cgImage: image,
+                size: NSSize(width: info.width, height: info.height)
+            ))
         }
 
         // Scroll back to top

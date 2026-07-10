@@ -1,13 +1,21 @@
 const HOST = "com.namaankohli.ezclip";
 const api = typeof browser !== "undefined" ? browser : chrome;
-const SOURCE_BROWSER = "firefox";
 const EXTENSION_ID = "ezclip-design-context@namaankohli.com";
 
-function withMetadata(payload, status = "ok", error = null) {
+async function sourceBrowser() {
+  try {
+    const info = await api.runtime.getBrowserInfo();
+    return /zen/i.test(info?.name || "") ? "zen" : "firefox";
+  } catch (_) {
+    return "firefox";
+  }
+}
+
+async function withMetadata(payload, status = "ok", error = null) {
   return {
     ...payload,
     schemaVersion: 1,
-    sourceBrowser: SOURCE_BROWSER,
+    sourceBrowser: await sourceBrowser(),
     sourceExtensionId: EXTENSION_ID,
     extractedAt: new Date().toISOString(),
     transportStatus: status,
@@ -34,12 +42,12 @@ async function captureActiveTab(tabId) {
   try {
     await api.tabs.executeScript(tabId, { file: "extractor.js" });
     const [payload] = await api.tabs.executeScript(tabId, { code: "ezclipExtractDesignContext();" });
-    if (payload?.url) await sendNative(withMetadata(payload));
+    if (payload?.url) await sendNative(await withMetadata(payload));
   } catch (error) {
     try {
       const tab = await api.tabs.get(tabId);
       if (!tab?.url) return;
-      await sendNative(withMetadata({
+      await sendNative(await withMetadata({
         url: tab.url,
         title: tab.title || "",
         fonts: [],

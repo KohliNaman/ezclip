@@ -14,6 +14,7 @@ final class CaptureRepository {
             var mutable = capture
             try mutable.insert(db)
         }
+        try await db.rebuildSearchDocument(captureId: capture.id)
     }
 
     func updateContext(
@@ -22,7 +23,7 @@ final class CaptureRepository {
         faviconPath: String?,
         albumArtPath: String?
     ) async throws -> Capture? {
-        try await db.write { db in
+        let updated: Capture? = try await db.write { db in
             guard var capture = try Capture.fetchOne(db, key: captureId) else { return nil }
 
             capture.contextType = context.contextType
@@ -48,6 +49,8 @@ final class CaptureRepository {
             try capture.update(db)
             return capture
         }
+        if let updated { try await db.rebuildSearchDocument(captureId: updated.id) }
+        return updated
     }
 
     func markContextFailed(captureId: UUID) async throws {

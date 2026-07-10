@@ -2,6 +2,17 @@ import XCTest
 @testable import ezclip
 
 final class DesignContextTests: XCTestCase {
+    func testZenBundleMapsToZenPayloadSource() {
+        XCTAssertEqual(BrowserDesignContextStore.sourceBrowser(for: "app.zen-browser.zen"), "zen")
+        XCTAssertEqual(BrowserDesignContextStore.sourceBrowser(for: "org.mozilla.firefox"), "firefox")
+    }
+
+    func testFirefoxBackgroundDetectsZenAtRuntime() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("BrowserExtensions/firefox/background.js"), encoding: .utf8)
+        XCTAssertTrue(source.contains("getBrowserInfo"))
+        XCTAssertTrue(source.contains("/zen/i"))
+    }
     func testDesignContextJSONDecodesFontsTokensAndButtons() {
         let json = """
         {

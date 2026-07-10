@@ -99,6 +99,41 @@ func sourceOutputURL(sourceBrowser: String?) throws -> URL? {
     return directory.appendingPathComponent("\(sourceBrowser)-latest.json")
 }
 
+func historyOutputURL(sourceBrowser: String?) throws -> URL? {
+    guard let sourceBrowser, !sourceBrowser.isEmpty else { return nil }
+    let support = try FileManager.default.url(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask,
+        appropriateFor: nil,
+        create: true
+    )
+    let directory = support
+        .appendingPathComponent("ezclip/browser-contexts", isDirectory: true)
+        .appendingPathComponent(sourceBrowser, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory.appendingPathComponent("\(Int(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString).json")
+}
+
+func pruneHistory(sourceBrowser: String?) {
+    guard let sourceBrowser,
+          let support = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+          ) else { return }
+    let directory = support.appendingPathComponent("ezclip/browser-contexts/\(sourceBrowser)")
+    let files = ((try? FileManager.default.contentsOfDirectory(
+        at: directory,
+        includingPropertiesForKeys: [.contentModificationDateKey]
+    )) ?? []).sorted {
+        let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        return lhs > rhs
+    }
+    for file in files.dropFirst(50) { try? FileManager.default.removeItem(at: file) }
+}
+
 func atomicallyWrite(_ data: Data, to destination: URL) throws {
     let temporary = destination.deletingLastPathComponent()
         .appendingPathComponent(".\(destination.lastPathComponent)-\(UUID().uuidString)")
@@ -129,6 +164,10 @@ do {
     try atomicallyWrite(data, to: destination)
     if let sourceDestination = try sourceOutputURL(sourceBrowser: context.sourceBrowser) {
         try atomicallyWrite(data, to: sourceDestination)
+    }
+    if let historyDestination = try historyOutputURL(sourceBrowser: context.sourceBrowser) {
+        try atomicallyWrite(data, to: historyDestination)
+        pruneHistory(sourceBrowser: context.sourceBrowser)
     }
     writeNativeMessage(["ok": "true"])
 } catch {

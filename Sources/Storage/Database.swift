@@ -169,6 +169,84 @@ final class DatabaseManager {
             }
         }
 
+        migrator.registerMigration("v7_durable_storage") { db in
+            let captureColumns = try Set(db.columns(in: "capture").map(\.name))
+            try db.alter(table: "capture") { table in
+                if !captureColumns.contains("contentHash") { table.add(column: "contentHash", .text) }
+                if !captureColumns.contains("storageStatus") {
+                    table.add(column: "storageStatus", .text).defaults(to: "ready")
+                }
+            }
+            try db.create(index: "idx_capture_contentHash", on: "capture", columns: ["contentHash"], unique: true)
+
+            try db.create(table: "captureTag_v7") { table in
+                table.column("captureId", .text).notNull().references("capture", onDelete: .cascade)
+                table.column("tagId", .text).notNull().references("tag", onDelete: .cascade)
+                table.primaryKey(["captureId", "tagId"])
+            }
+            try db.execute(sql: "INSERT OR IGNORE INTO captureTag_v7 SELECT captureId, tagId FROM captureTag")
+            try db.drop(table: "captureTag")
+            try db.rename(table: "captureTag_v7", to: "captureTag")
+            try db.create(index: "idx_captureTag_captureId_v7", on: "captureTag", columns: ["captureId"])
+            try db.create(index: "idx_captureTag_tagId_v7", on: "captureTag", columns: ["tagId"])
+
+            try db.create(table: "fileDeletionQueue") { table in
+                table.column("id", .text).primaryKey()
+                table.column("path", .text).notNull().unique()
+                table.column("createdAt", .datetime).notNull()
+                table.column("attemptCount", .integer).notNull().defaults(to: 0)
+                table.column("lastError", .text)
+                table.column("nextAttemptAt", .datetime)
+            }
+            try db.create(index: "idx_fileDeletionQueue_nextAttemptAt", on: "fileDeletionQueue", columns: ["nextAttemptAt"])
+        }
+
+        migrator.registerMigration("v8_capture_analysis_search") { db in
+            let columns = try Set(db.columns(in: "captureAIContext").map(\.name))
+            try db.alter(table: "captureAIContext") { table in
+                if !columns.contains("kind") { table.add(column: "kind", .text).notNull().defaults(to: "other") }
+                if !columns.contains("suggestedTitle") { table.add(column: "suggestedTitle", .text) }
+                if !columns.contains("entitiesJSON") { table.add(column: "entitiesJSON", .text).notNull().defaults(to: "{}") }
+                if !columns.contains("ocrText") { table.add(column: "ocrText", .text) }
+                if !columns.contains("schemaVersion") { table.add(column: "schemaVersion", .integer).notNull().defaults(to: 2) }
+                if !columns.contains("attemptCount") { table.add(column: "attemptCount", .integer).notNull().defaults(to: 0) }
+                if !columns.contains("nextRetryAt") { table.add(column: "nextRetryAt", .datetime) }
+                if !columns.contains("failureKind") { table.add(column: "failureKind", .text) }
+            }
+            try db.create(index: "idx_captureAIContext_kind", on: "captureAIContext", columns: ["kind"])
+            try db.create(index: "idx_captureAIContext_nextRetryAt", on: "captureAIContext", columns: ["nextRetryAt"])
+
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE captureSearchFTS USING fts5(
+                    captureId UNINDEXED,
+                    content,
+                    tokenize = 'unicode61 remove_diacritics 2'
+                )
+                """)
+            try db.execute(sql: """
+                INSERT INTO captureSearchFTS(captureId, content)
+                SELECT id, trim(
+                    coalesce(appName, '') || ' ' || coalesce(windowTitle, '') || ' ' ||
+                    coalesce(url, '') || ' ' || coalesce(pageTitle, '') || ' ' ||
+                    coalesce(songName, '') || ' ' || coalesce(artistName, '') || ' ' ||
+                    coalesce(designFileName, '') || ' ' || coalesce(notes, '')
+                ) FROM capture
+                """)
+        }
+
+        migrator.registerMigration("v9_canvas") { db in
+            try db.create(table: "canvasPlacement") { table in
+                table.column("boardKey", .text).notNull()
+                table.column("captureId", .text).notNull().references("capture", onDelete: .cascade)
+                table.column("x", .double).notNull()
+                table.column("y", .double).notNull()
+                table.column("zIndex", .integer).notNull().defaults(to: 0)
+                table.column("scale", .double).notNull().defaults(to: 1)
+                table.primaryKey(["boardKey", "captureId"])
+            }
+            try db.create(index: "idx_canvasPlacement_captureId", on: "canvasPlacement", columns: ["captureId"])
+        }
+
         return migrator
     }
 
@@ -182,6 +260,141 @@ final class DatabaseManager {
     func read<T>(_ value: @escaping (Database) throws -> T) async throws -> T {
         try setup()
         return try dbQueue!.read(value)
+    }
+
+    func capture(withContentHash hash: String) async throws -> Capture? {
+        try await read { db in
+            try Capture.filter(Capture.Columns.contentHash == hash).fetchOne(db)
+        }
+    }
+
+    func deleteCaptureAndEnqueueFiles(id: UUID) async throws {
+        try await write { db in
+            guard let capture = try Capture.fetchOne(db, key: id) else { return }
+            let children = try Capture.filter(Capture.Columns.parentCaptureId == id).fetchAll(db)
+            let captures = children + [capture]
+            let paths = captures.flatMap { item in
+                [item.screenshotPath, item.thumbnailPath, item.faviconPath, item.albumArtPath].compactMap { $0 }
+            }
+            for path in Set(paths) {
+                var record = FileDeletionRecord(
+                    id: UUID(), path: path, createdAt: Date(), attemptCount: 0,
+                    lastError: nil, nextAttemptAt: nil
+                )
+                try record.insert(db, onConflict: .ignore)
+            }
+            for child in children {
+                try db.execute(sql: "DELETE FROM captureSearchFTS WHERE captureId = ?", arguments: [child.id])
+                _ = try child.delete(db)
+            }
+            try db.execute(sql: "DELETE FROM captureSearchFTS WHERE captureId = ?", arguments: [capture.id])
+            _ = try capture.delete(db)
+        }
+    }
+
+    func pendingFileDeletions(limit: Int) async throws -> [FileDeletionRecord] {
+        try await read { db in
+            try FileDeletionRecord.fetchAll(
+                db,
+                sql: """
+                SELECT * FROM fileDeletionQueue
+                WHERE nextAttemptAt IS NULL OR nextAttemptAt <= ?
+                ORDER BY createdAt ASC LIMIT ?
+                """,
+                arguments: [Date(), limit]
+            )
+        }
+    }
+
+    func completeFileDeletion(id: UUID) async throws {
+        _ = try await write { db in try FileDeletionRecord.deleteOne(db, key: id) }
+    }
+
+    func failFileDeletion(id: UUID, error: String) async throws {
+        try await write { db in
+            guard var record = try FileDeletionRecord.fetchOne(db, key: id) else { return }
+            record.attemptCount += 1
+            record.lastError = String(error.prefix(500))
+            record.nextAttemptAt = Date().addingTimeInterval(min(3600, pow(2, Double(record.attemptCount)) * 5))
+            try record.update(db)
+        }
+    }
+
+    func saveLocalAnalysis(
+        captureId: UUID,
+        ocrText: String,
+        kind: CaptureKind,
+        title: String?,
+        entitiesJSON: String
+    ) async throws {
+        try await write { db in
+            let existing = try CaptureAIContext.fetchOne(db, key: captureId)
+            var context = CaptureAIContext(
+                captureId: captureId,
+                visibleTags: existing?.visibleTags ?? [],
+                hiddenSearchTags: existing?.hiddenSearchTags ?? [],
+                summary: existing?.summary,
+                provider: existing?.provider ?? "local",
+                model: existing?.model ?? "vision-ocr",
+                status: existing?.status == .complete ? .complete : .local,
+                error: existing?.error,
+                confidence: existing?.confidence,
+                createdAt: existing?.createdAt ?? Date(),
+                updatedAt: Date(),
+                kind: kind,
+                suggestedTitle: title,
+                entitiesJSON: entitiesJSON,
+                ocrText: ocrText,
+                attemptCount: existing?.attemptCount ?? 0
+            )
+            try context.save(db)
+            try Self.rebuildSearchDocument(captureId: captureId, db: db)
+        }
+    }
+
+    func canvasPlacements(boardKey: String) async throws -> [CanvasPlacement] {
+        try await read { db in
+            try CanvasPlacement
+                .filter(Column("boardKey") == boardKey)
+                .order(Column("zIndex"))
+                .fetchAll(db)
+        }
+    }
+
+    func saveCanvasPlacement(_ placement: CanvasPlacement) async throws {
+        try await write { db in
+            var mutable = placement
+            try mutable.save(db)
+        }
+    }
+
+    func rebuildSearchDocument(captureId: UUID) async throws {
+        try await write { db in try Self.rebuildSearchDocument(captureId: captureId, db: db) }
+    }
+
+    private static func rebuildSearchDocument(captureId: UUID, db: Database) throws {
+        guard let capture = try Capture.fetchOne(db, key: captureId) else {
+            try db.execute(sql: "DELETE FROM captureSearchFTS WHERE captureId = ?", arguments: [captureId])
+            return
+        }
+        let tags = try tagNames(for: captureId, db: db).joined(separator: " ")
+        let analysis = try CaptureAIContext.fetchOne(db, key: captureId)
+        let collectionName: String = try capture.collectionId.flatMap { id in
+            try String.fetchOne(db, sql: "SELECT name FROM collection WHERE id = ?", arguments: [id])
+        } ?? ""
+        let content = [
+            capture.appName, capture.windowTitle, capture.url, capture.pageTitle,
+            capture.songName, capture.artistName, capture.albumName, capture.designFileName,
+            capture.designPageName, capture.notes, tags, collectionName,
+            analysis?.suggestedTitle, analysis?.summary, analysis?.ocrText,
+            analysis?.visibleTags.joined(separator: " "),
+            analysis?.hiddenSearchTags.joined(separator: " "), analysis?.entitiesJSON
+        ].compactMap { $0 }.joined(separator: " ")
+        try db.execute(sql: "DELETE FROM captureSearchFTS WHERE captureId = ?", arguments: [captureId])
+        try db.execute(
+            sql: "INSERT INTO captureSearchFTS(captureId, content) VALUES (?, ?)",
+            arguments: [captureId, content]
+        )
     }
 
     // MARK: - Tag helpers
@@ -214,6 +427,7 @@ final class DatabaseManager {
                 )
             }
             try Self.recalculateTagUsageCounts(db)
+            try Self.rebuildSearchDocument(captureId: captureId, db: db)
         }
     }
 
@@ -286,6 +500,7 @@ final class DatabaseManager {
             try Self.setTagNames(normalizedNames, for: captureId, db: db)
             try Self.recalculateTagUsageCounts(db)
             try Self.deleteUnusedTags(db)
+            try Self.rebuildSearchDocument(captureId: captureId, db: db)
         }
     }
 
@@ -298,6 +513,7 @@ final class DatabaseManager {
                 var existingNames = try Self.tagNames(for: captureId, db: db)
                 existingNames.formUnion(normalizedNames)
                 try Self.setTagNames(Array(existingNames).sorted(), for: captureId, db: db)
+                try Self.rebuildSearchDocument(captureId: captureId, db: db)
             }
             try Self.recalculateTagUsageCounts(db)
             try Self.deleteUnusedTags(db)
@@ -313,6 +529,7 @@ final class DatabaseManager {
                 var existingNames = try Self.tagNames(for: captureId, db: db)
                 existingNames.subtract(normalizedNames)
                 try Self.setTagNames(Array(existingNames).sorted(), for: captureId, db: db)
+                try Self.rebuildSearchDocument(captureId: captureId, db: db)
             }
             try Self.recalculateTagUsageCounts(db)
             try Self.deleteUnusedTags(db)
@@ -323,6 +540,7 @@ final class DatabaseManager {
         try await write { db in
             var mutable = context
             try mutable.save(db)
+            try Self.rebuildSearchDocument(captureId: context.captureId, db: db)
         }
     }
 

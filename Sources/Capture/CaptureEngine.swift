@@ -5,7 +5,7 @@
 final class ScreenCaptureManager: NSObject {
     static let shared = ScreenCaptureManager()
 
-    func captureFrontmostWindow() async throws -> (image: NSImage, windowInfo: WindowInfo) {
+    func captureFrontmostWindow() async throws -> (image: CGImage, windowInfo: WindowInfo) {
         // Get frontmost app
         guard let frontApp = NSWorkspace.shared.frontmostApplication,
               let bundleId = frontApp.bundleIdentifier else {
@@ -48,23 +48,23 @@ final class ScreenCaptureManager: NSObject {
             throw CaptureError.windowNotFound
         }
 
-        // Use CGWindowListCreateImage for reliable single-frame capture
-        // ScreenCaptureKit's streaming API is overkill for one frame
-        let windowID = targetWindow.windowID
+        let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
+        let configuration = SCStreamConfiguration()
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        configuration.width = max(1, Int(targetWindow.frame.width * scale))
+        configuration.height = max(1, Int(targetWindow.frame.height * scale))
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
 
-        guard let cgImage = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            windowID,
-            [.boundsIgnoreFraming, .bestResolution]
-        ) else {
+        let cgImage: CGImage
+        do {
+            cgImage = try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: configuration
+            )
+        } catch {
             throw CaptureError.captureFailed
         }
-
-        let nsImage = NSImage(cgImage: cgImage, size: NSSize(
-            width: targetWindow.frame.width,
-            height: targetWindow.frame.height
-        ))
 
         let windowInfo = WindowInfo(
             appName: appName,
@@ -74,7 +74,7 @@ final class ScreenCaptureManager: NSObject {
             height: targetWindow.frame.height
         )
 
-        return (nsImage, windowInfo)
+        return (cgImage, windowInfo)
     }
 }
 

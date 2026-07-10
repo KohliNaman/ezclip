@@ -1,15 +1,21 @@
 import SwiftUI
 
 struct LibraryView: View {
-    @EnvironmentObject var viewModel: LibraryViewModel
+    @Environment(LibraryViewModel.self) private var viewModel
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showingSettings = false
     @State private var bulkTagMode: BulkTagMode?
     @State private var showingSelectionCollectionSheet = false
     @State private var keyMonitor: Any?
+    @AppStorage("ezclip.libraryAppearance") private var appearance = LibraryAppearanceMode.studio.rawValue
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        @Bindable var viewModel = viewModel
+        Group {
+            if appearance == LibraryAppearanceMode.studio.rawValue {
+                StudioLibraryView()
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
         } detail: {
@@ -163,9 +169,19 @@ struct LibraryView: View {
                     }
                 }
             }
+                }
+            }
         }
         .task {
             await viewModel.loadAll()
+        }
+        .task(id: viewModel.searchText) {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            await viewModel.loadAll()
+        }
+        .onChange(of: viewModel.sortOrder) { _, _ in
+            Task { await viewModel.loadAll() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newCaptureCreated)) { _ in
             Task { await viewModel.loadAll() }
@@ -436,7 +452,7 @@ private struct NewCollectionForSelectionSheet: View {
 // MARK: - Filter Bar
 
 struct FilterBar: View {
-    @EnvironmentObject var viewModel: LibraryViewModel
+    @Environment(LibraryViewModel.self) private var viewModel
     @State private var searchText = ""
 
     var body: some View {

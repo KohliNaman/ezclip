@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MenuBarView: View {
-    @EnvironmentObject var viewModel: LibraryViewModel
+    @Environment(LibraryViewModel.self) private var viewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,18 +48,7 @@ struct MenuBarView: View {
                     LazyVStack(spacing: 2) {
                         ForEach(viewModel.captures.prefix(10)) { capture in
                             HStack(spacing: 8) {
-                                if let thumb = ImageStorageManager.shared.thumbnailImage(for: capture) {
-                                    Image(nsImage: thumb)
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: 40, height: 30)
-                                        .cornerRadius(4)
-                                        .clipped()
-                                } else {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(.quaternary)
-                                        .frame(width: 40, height: 30)
-                                }
+                                MenuBarThumbnail(capture: capture)
 
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(capture.contextDescription)
@@ -115,6 +104,25 @@ struct MenuBarView: View {
         .frame(width: 280)
         .task {
             await viewModel.loadAll()
+        }
+    }
+}
+
+private struct MenuBarThumbnail: View {
+    let capture: Capture
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
+            else { RoundedRectangle(cornerRadius: 4).fill(.quaternary) }
+        }
+        .frame(width: 40, height: 30)
+        .clipShape(.rect(cornerRadius: 4))
+        .task(id: capture.id) {
+            image = await Task.detached(priority: .utility) {
+                ImageStorageManager.shared.thumbnailImage(for: capture)
+            }.value
         }
     }
 }

@@ -125,6 +125,22 @@ enum BrowserDesignContextStore {
         latestMatch(matching: url, bundleId: nil).json
     }
 
+    static func authoritativeContext(
+        matchingWindowTitle windowTitle: String,
+        bundleId: String?,
+        now: Date = Date()
+    ) -> BrowserDesignContext? {
+        let source = sourceBrowser(for: bundleId)
+        return candidatePayloads(sourceBrowser: source).compactMap { payload -> BrowserDesignContext? in
+            guard let context = try? JSONDecoder.ezclip.decode(BrowserDesignContext.self, from: payload.data),
+                  context.sourceBrowser == source,
+                  isFresh(context, maxAge: 30, now: now),
+                  titleScore(context.title, windowTitle) >= 2
+            else { return nil }
+            return context
+        }.first
+    }
+
     static func latestMatch(matching url: String?, bundleId: String?, now: Date = Date()) -> BrowserDesignContextMatch {
         let source = sourceBrowser(for: bundleId)
         let payloads = candidatePayloads(sourceBrowser: source)
@@ -180,6 +196,16 @@ enum BrowserDesignContextStore {
     private static func candidatePayloads(sourceBrowser: String?) -> [(data: Data, modifiedAt: Date?)] {
         var urls: [URL] = []
         if let sourceBrowser, let recordsDirectoryURL {
+            let historyDirectory = recordsDirectoryURL.appendingPathComponent(sourceBrowser, isDirectory: true)
+            let history = ((try? FileManager.default.contentsOfDirectory(
+                at: historyDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey]
+            )) ?? []).sorted {
+                let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return lhs > rhs
+            }
+            urls.append(contentsOf: history.prefix(50))
             urls.append(recordsDirectoryURL.appendingPathComponent("\(sourceBrowser)-latest.json"))
             switch sourceBrowser {
             case "chrome", "helium":
@@ -300,6 +326,21 @@ enum BrowserDesignContextStore {
     private static func isFresh(_ context: BrowserDesignContext, maxAge: TimeInterval, now: Date) -> Bool {
         guard let capturedAt = context.capturedAt else { return true }
         return abs(capturedAt.timeIntervalSince(now)) <= maxAge
+    }
+
+    private static func titleScore(_ lhs: String?, _ rhs: String) -> Int {
+        guard let lhs else { return 0 }
+        let left = titleWords(lhs)
+        let right = titleWords(rhs)
+        if left == right, !left.isEmpty { return 100 }
+        return left.intersection(right).count
+    }
+
+    private static func titleWords(_ value: String) -> Set<String> {
+        Set(value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 2 && !["zen", "firefox", "mozilla"].contains($0) })
     }
 }
 

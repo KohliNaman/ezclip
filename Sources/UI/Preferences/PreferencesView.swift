@@ -11,6 +11,8 @@ struct SettingsView: View {
     @AppStorage("ezclip.ai.maxTagsPerRun") private var maxTagsPerRun = 12
     @AppStorage("ezclip.ai.delayBetweenRequests") private var delayBetweenRequests = 8.0
     @AppStorage("ezclip.ai.geminiModel") private var geminiModel = "gemini-3.1-flash-lite"
+    @AppStorage("ezclip.libraryAppearance") private var libraryAppearance = LibraryAppearanceMode.studio.rawValue
+    @AppStorage("ezclip.ai.allowCloudVision") private var allowCloudVision = false
     @State private var permissionsOK = false
     @State private var geminiAPIKey = ""
     @State private var isBackfillingAITags = false
@@ -78,6 +80,7 @@ struct SettingsView: View {
 
             if aiProvider == AITaggingProviderKind.gemini.rawValue {
                 Section("Gemini") {
+                    Toggle("Allow screenshot uploads", isOn: $allowCloudVision)
                     SecureField("API key", text: $geminiAPIKey)
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: geminiAPIKey) { _, newValue in
@@ -205,6 +208,13 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section {
+                Picker("Library appearance", selection: $libraryAppearance) {
+                    ForEach(LibraryAppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 Toggle("Enable hotkey (⌘⌘)", isOn: $hotkeyEnabled)
                     .onChange(of: hotkeyEnabled) { _, enabled in
                         if enabled {

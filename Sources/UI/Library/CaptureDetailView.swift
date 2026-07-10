@@ -33,6 +33,9 @@ struct SimpleDetailView: View {
                     }
 
                     contextSection
+                    if let analysis = viewModel.currentAIContext {
+                        analysisSection(analysis)
+                    }
                     if let designContext = BrowserDesignContextStore.decode(viewModel.capture.designContextJSON) {
                         designContextSection(designContext)
                     } else if viewModel.capture.contextType == .website {
@@ -315,6 +318,37 @@ struct SimpleDetailView: View {
         }
     }
 
+    private func analysisSection(_ analysis: CaptureAIContext) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(analysis.kind.displayName, systemImage: analysis.kind.iconName)
+                    .font(.headline)
+                Spacer()
+                Text(analysis.provider == "local" ? "On-device" : analysis.provider)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let title = analysis.suggestedTitle, !title.isEmpty {
+                Text(title).font(.body.weight(.medium))
+            }
+            if let summary = analysis.summary, !summary.isEmpty {
+                Text(summary).font(.callout).foregroundStyle(.secondary)
+            }
+            if let ocr = analysis.ocrText, !ocr.isEmpty {
+                DisclosureGroup("Searchable text") {
+                    Text(ocr)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 6)
+                }
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.3))
+        .clipShape(.rect(cornerRadius: 8))
+    }
+
     private func designContextSection(_ context: BrowserDesignContext) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Design Context", systemImage: "paintpalette.fill")
@@ -501,7 +535,7 @@ struct SimpleDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        } else if viewModel.currentAIContext?.status == .complete {
+        } else if viewModel.currentAIContext?.status == .complete || viewModel.currentAIContext?.status == .local {
             Label("AI", systemImage: "sparkles")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -529,6 +563,8 @@ struct SimpleDetailView: View {
     private var aiStatusMessage: String? {
         guard let context = viewModel.currentAIContext else { return nil }
         switch context.status {
+        case .local:
+            return nil
         case .pending:
             return "AI tagging is running in the background."
         case .complete:

@@ -2,26 +2,32 @@ import SwiftUI
 import Combine
 import GRDB
 import AppKit
+import Observation
 
+@Observable
 @MainActor
-final class LibraryViewModel: ObservableObject {
-    @Published var captures: [Capture] = []
-    @Published var collections: [Collection] = []
-    @Published var tags: [Tag] = []
-    @Published var captureTagsByCaptureID: [UUID: Set<String>] = [:]
-    @Published var aiContextsByCaptureID: [UUID: CaptureAIContext] = [:]
-    @Published var searchText: String = ""
-    @Published var selectedContextType: ContextType?
-    @Published var selectedCollectionId: UUID?
-    @Published var selectedTagName: String?
-    @Published var selectedCapture: Capture?
-    @Published var sortOrder: SortOrder = .newest
-    @Published var isLoading = false
-    @Published var isSelectionMode = false
-    @Published var selectedCaptureIDs: Set<UUID> = []
-    @Published var lastSelectedCaptureID: UUID?
+final class LibraryViewModel {
+    var captures: [Capture] = []
+    var collections: [Collection] = []
+    var tags: [Tag] = []
+    var captureTagsByCaptureID: [UUID: Set<String>] = [:]
+    var aiContextsByCaptureID: [UUID: CaptureAIContext] = [:]
+    var searchText: String = ""
+    var selectedContextType: ContextType?
+    var selectedCaptureKind: CaptureKind?
+    var selectedCollectionId: UUID?
+    var selectedTagName: String?
+    var selectedCapture: Capture?
+    var sortOrder: SortOrder = .newest
+    var isLoading = false
+    var isLoadingNextPage = false
+    var hasMoreCaptures = false
+    var isSelectionMode = false
+    var selectedCaptureIDs: Set<UUID> = []
+    var lastSelectedCaptureID: UUID?
 
     private let db = DatabaseManager.shared
+    private let pageSize = 200
 
     enum SortOrder: String, CaseIterable, Identifiable {
         case newest = "Newest"
@@ -36,48 +42,31 @@ final class LibraryViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            captures = try await db.read { db in
-                try Capture
-                    .filter(sql: "parentCaptureId IS NULL")
-                    .order(sql: self.sortOrder.orderSQL)
-                    .fetchAll(db)
-            }
-            collections = try await db.read { db in
-                try Collection
-                    .order(Collection.Columns.sortOrder)
-                    .fetchAll(db)
-            }
-            tags = try await db.read { db in
-                try Tag
-                    .order(Tag.Columns.usageCount.desc)
-                    .fetchAll(db)
-            }
-            captureTagsByCaptureID = try await db.read { db in
-                let rows = try Row.fetchAll(
-                    db,
-                    sql: """
-                    SELECT captureTag.captureId, tag.name
-                    FROM captureTag
-                    JOIN tag ON tag.id = captureTag.tagId
-                    """
-                )
-
-                var tagsByCapture: [UUID: Set<String>] = [:]
-                for row in rows {
-                    guard
-                        let captureId: UUID = row["captureId"],
-                        let tagName: String = row["name"]
-                    else { continue }
-                    tagsByCapture[captureId, default: []].insert(tagName)
-                }
-                return tagsByCapture
-            }
-            aiContextsByCaptureID = try await self.db.allAITaggingContexts()
-                .reduce(into: [:]) { partial, context in
-                    partial[context.captureId] = context
-                }
+            let snapshot = try await fetchSnapshot(after: nil)
+            captures = snapshot.captures
+            collections = snapshot.collections
+            tags = snapshot.tags
+            captureTagsByCaptureID = snapshot.captureTags
+            aiContextsByCaptureID = snapshot.analyses
+            hasMoreCaptures = snapshot.captures.count == pageSize
         } catch {
             print("Failed to load library: \(error)")
+        }
+    }
+
+    func loadNextPage() async {
+        guard hasMoreCaptures, !isLoadingNextPage, let cursor = captures.last else { return }
+        isLoadingNextPage = true
+        defer { isLoadingNextPage = false }
+        do {
+            let snapshot = try await fetchSnapshot(after: cursor)
+            let existing = Set(captures.map(\.id))
+            captures.append(contentsOf: snapshot.captures.filter { !existing.contains($0.id) })
+            captureTagsByCaptureID.merge(snapshot.captureTags) { _, new in new }
+            aiContextsByCaptureID.merge(snapshot.analyses) { _, new in new }
+            hasMoreCaptures = snapshot.captures.count == pageSize
+        } catch {
+            print("Failed to load next library page: \(error)")
         }
     }
 
@@ -86,6 +75,10 @@ final class LibraryViewModel: ObservableObject {
 
         if let type = selectedContextType {
             results = results.filter { $0.contextType == type }
+        }
+
+        if let selectedCaptureKind {
+            results = results.filter { aiContextsByCaptureID[$0.id]?.kind == selectedCaptureKind }
         }
 
         if let collectionId = selectedCollectionId {
@@ -140,30 +133,46 @@ final class LibraryViewModel: ObservableObject {
 
     func showAllCaptures() {
         selectedContextType = nil
+        selectedCaptureKind = nil
         selectedCollectionId = nil
         selectedTagName = nil
         clearSelection()
     }
 
     func selectContextType(_ type: ContextType) {
+        selectedCaptureKind = nil
         selectedCollectionId = nil
         selectedTagName = nil
         selectedContextType = selectedContextType == type ? nil : type
         clearSelection()
+        Task { await loadAll() }
+    }
+
+    func selectCaptureKind(_ kind: CaptureKind) {
+        selectedContextType = nil
+        selectedCollectionId = nil
+        selectedTagName = nil
+        selectedCaptureKind = selectedCaptureKind == kind ? nil : kind
+        clearSelection()
+        Task { await loadAll() }
     }
 
     func selectCollection(_ collectionId: UUID?) {
         selectedContextType = nil
+        selectedCaptureKind = nil
         selectedTagName = nil
         selectedCollectionId = collectionId
         clearSelection()
+        Task { await loadAll() }
     }
 
     func selectTag(_ tagName: String) {
         selectedContextType = nil
+        selectedCaptureKind = nil
         selectedCollectionId = nil
         selectedTagName = selectedTagName == tagName ? nil : tagName
         clearSelection()
+        Task { await loadAll() }
     }
 
     func renameTag(_ tag: Tag, to name: String) async {
@@ -280,6 +289,7 @@ final class LibraryViewModel: ObservableObject {
             try await db.write { db in
                 try updated.update(db)
             }
+            try await db.rebuildSearchDocument(captureId: updated.id)
             await loadAll()
         } catch {
             print("Failed to update notes: \(error)")
@@ -326,6 +336,7 @@ final class LibraryViewModel: ObservableObject {
                     try capture.update(db)
                 }
             }
+            try await db.rebuildSearchDocument(captureId: captureId)
             await loadAll()
         } catch {
             print("Failed to assign collection: \(error)")
@@ -352,6 +363,7 @@ final class LibraryViewModel: ObservableObject {
                     }
                 }
             }
+            for id in ids { try await db.rebuildSearchDocument(captureId: id) }
             await loadAll()
         } catch {
             print("Failed to assign selected captures: \(error)")
@@ -478,6 +490,96 @@ final class LibraryViewModel: ObservableObject {
                 .map(String.init)
         )
     }
+
+    private struct Snapshot {
+        var captures: [Capture]
+        var collections: [Collection]
+        var tags: [Tag]
+        var captureTags: [UUID: Set<String>]
+        var analyses: [UUID: CaptureAIContext]
+    }
+
+    private func fetchSnapshot(after cursor: Capture?) async throws -> Snapshot {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedContextType = selectedContextType
+        let selectedCaptureKind = selectedCaptureKind
+        let selectedCollectionId = selectedCollectionId
+        let selectedTagName = selectedTagName
+        let sortOrder = sortOrder
+        let pageSize = pageSize
+
+        return try await db.read { database in
+            var joins: [String] = []
+            var predicates = ["capture.parentCaptureId IS NULL"]
+            var arguments = StatementArguments()
+
+            if !query.isEmpty {
+                joins.append("JOIN captureSearchFTS ON captureSearchFTS.captureId = capture.id")
+                predicates.append("captureSearchFTS MATCH ?")
+                arguments += [Self.ftsQuery(query)]
+            }
+            if let selectedCaptureKind {
+                joins.append("JOIN captureAIContext analysis ON analysis.captureId = capture.id")
+                predicates.append("analysis.kind = ?")
+                arguments += [selectedCaptureKind.rawValue]
+            }
+            if let selectedContextType {
+                predicates.append("capture.contextType = ?")
+                arguments += [selectedContextType.rawValue]
+            }
+            if let selectedCollectionId {
+                predicates.append("capture.collectionId = ?")
+                arguments += [selectedCollectionId]
+            }
+            if let selectedTagName {
+                predicates.append("EXISTS (SELECT 1 FROM captureTag ct JOIN tag t ON t.id = ct.tagId WHERE ct.captureId = capture.id AND t.name = ?)")
+                arguments += [selectedTagName]
+            }
+            if let cursor {
+                predicates.append(sortOrder.cursorPredicate)
+                arguments += sortOrder.cursorArguments(cursor)
+            }
+            arguments += [pageSize]
+            let sql = """
+                SELECT capture.* FROM capture
+                \(joins.joined(separator: " "))
+                WHERE \(predicates.joined(separator: " AND "))
+                ORDER BY \(sortOrder.orderSQL), capture.id \(sortOrder.idDirection)
+                LIMIT ?
+                """
+            let captures = try Capture.fetchAll(database, sql: sql, arguments: arguments)
+            let ids = captures.map(\.id)
+            let collections = cursor == nil ? try Collection.order(Collection.Columns.sortOrder).fetchAll(database) : []
+            let tags = cursor == nil ? try Tag.order(Tag.Columns.usageCount.desc).fetchAll(database) : []
+            guard !ids.isEmpty else {
+                return Snapshot(captures: [], collections: collections, tags: tags, captureTags: [:], analyses: [:])
+            }
+            let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+            let tagRows = try Row.fetchAll(
+                database,
+                sql: "SELECT captureTag.captureId, tag.name FROM captureTag JOIN tag ON tag.id = captureTag.tagId WHERE captureTag.captureId IN (\(placeholders))",
+                arguments: StatementArguments(ids)
+            )
+            var tagsByCapture: [UUID: Set<String>] = [:]
+            for row in tagRows {
+                if let id: UUID = row["captureId"], let name: String = row["name"] {
+                    tagsByCapture[id, default: []].insert(name)
+                }
+            }
+            let analyses = try CaptureAIContext
+                .filter(ids.contains(CaptureAIContext.Columns.captureId))
+                .fetchAll(database)
+                .reduce(into: [UUID: CaptureAIContext]()) { $0[$1.captureId] = $1 }
+            return Snapshot(captures: captures, collections: collections, tags: tags, captureTags: tagsByCapture, analyses: analyses)
+        }
+    }
+
+    nonisolated private static func ftsQuery(_ value: String) -> String {
+        value.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"*" }
+            .joined(separator: " AND ")
+    }
 }
 
 // MARK: - Sort order SQL
@@ -488,6 +590,23 @@ private extension LibraryViewModel.SortOrder {
         case .newest: "timestamp DESC"
         case .oldest: "timestamp ASC"
         case .appName: "appName ASC"
+        }
+    }
+
+    var idDirection: String { self == .newest ? "DESC" : "ASC" }
+
+    var cursorPredicate: String {
+        switch self {
+        case .newest: "(capture.timestamp < ? OR (capture.timestamp = ? AND capture.id < ?))"
+        case .oldest: "(capture.timestamp > ? OR (capture.timestamp = ? AND capture.id > ?))"
+        case .appName: "(capture.appName COLLATE NOCASE > ? OR (capture.appName = ? AND capture.id > ?))"
+        }
+    }
+
+    func cursorArguments(_ capture: Capture) -> StatementArguments {
+        switch self {
+        case .newest, .oldest: [capture.timestamp, capture.timestamp, capture.id]
+        case .appName: [capture.appName, capture.appName, capture.id]
         }
     }
 }

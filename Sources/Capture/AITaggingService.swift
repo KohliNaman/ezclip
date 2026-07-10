@@ -29,6 +29,7 @@ struct AITaggingSettings {
     var delayBetweenRequests: TimeInterval
     var geminiAPIKey: String
     var geminiModel: String
+    var allowCloudVision: Bool
 
     static var current: AITaggingSettings {
         let defaults = UserDefaults.standard
@@ -39,7 +40,8 @@ struct AITaggingSettings {
             maxTagsPerRun: max(1, defaults.object(forKey: "ezclip.ai.maxTagsPerRun") as? Int ?? 12),
             delayBetweenRequests: max(0, defaults.object(forKey: "ezclip.ai.delayBetweenRequests") as? TimeInterval ?? 8),
             geminiAPIKey: KeychainStore.string(for: "geminiAPIKey") ?? defaults.string(forKey: "ezclip.ai.geminiAPIKey") ?? "",
-            geminiModel: defaults.string(forKey: "ezclip.ai.geminiModel") ?? "gemini-3.1-flash-lite"
+            geminiModel: defaults.string(forKey: "ezclip.ai.geminiModel") ?? "gemini-3.1-flash-lite",
+            allowCloudVision: defaults.bool(forKey: "ezclip.ai.allowCloudVision")
         )
     }
 }
@@ -55,6 +57,9 @@ struct AITaggingResult: Codable, Equatable, Sendable {
     var hiddenSearchTags: [String]
     var summary: String
     var confidence: Double
+    var kind: CaptureKind? = nil
+    var suggestedTitle: String? = nil
+    var entities: [String: [String]]? = nil
 }
 
 struct AITaggingProviderAvailability: Equatable, Sendable {
@@ -79,6 +84,7 @@ enum AITaggingError: LocalizedError {
     case missingAPIKey
     case imageUnavailable
     case unsupportedProvider(String)
+    case cloudVisionDisabled
     case invalidResponse
     case requestFailed(String)
 
@@ -88,6 +94,7 @@ enum AITaggingError: LocalizedError {
         case .missingAPIKey: "Gemini API key is missing."
         case .imageUnavailable: "The screenshot file is unavailable."
         case .unsupportedProvider(let message): message
+        case .cloudVisionDisabled: "Enable screenshot uploads in Settings > AI before using Gemini vision."
         case .invalidResponse: "The AI provider returned an invalid response."
         case .requestFailed(let message): message
         }
@@ -153,6 +160,11 @@ final class AITaggingService {
                 confidence: min(max(result.confidence, 0), 1),
                 createdAt: existing?.createdAt ?? Date(),
                 updatedAt: Date()
+                , kind: result.kind ?? existing?.kind ?? .other
+                , suggestedTitle: result.suggestedTitle ?? existing?.suggestedTitle
+                , entitiesJSON: Self.entitiesJSON(result.entities) ?? existing?.entitiesJSON ?? "{}"
+                , ocrText: existing?.ocrText
+                , attemptCount: existing?.attemptCount ?? 0
             )
             try await db.saveAITaggingContext(context)
             try await db.addTagNames(visibleTags, to: [capture.id])
@@ -161,6 +173,11 @@ final class AITaggingService {
         } catch {
             await saveFailure(for: capture, provider: provider.providerId, model: provider.modelId, error: error)
         }
+    }
+
+    nonisolated private static func entitiesJSON(_ entities: [String: [String]]?) -> String? {
+        guard let entities, let data = try? JSONEncoder().encode(entities) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private func canStartTagging(capture: Capture, settings: AITaggingSettings, isUserInitiated: Bool) async -> Bool {
@@ -208,6 +225,7 @@ final class AITaggingService {
         case .off:
             throw AITaggingError.providerOff
         case .gemini:
+            guard settings.allowCloudVision else { throw AITaggingError.cloudVisionDisabled }
             guard !settings.geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw AITaggingError.missingAPIKey
             }
@@ -246,20 +264,24 @@ final class AITaggingService {
 struct AITaggingPromptBuilder {
     static func prompt(for capture: Capture) -> String {
         var lines: [String] = [
-            "You are tagging screenshots for ezclip, a macOS design-inspiration library.",
-            "Analyze the screenshot like a senior product designer building a reusable inspiration archive.",
+            "You organize screenshots for ezclip, a personal visual memory library.",
+            "The archive contains songs, conversations, bookings, places, articles, products, social posts, documents, and design references.",
+            "Optimize for retrieval months later: identify what this is, who or what it concerns, and why the user may want it again.",
             "Return strict JSON only. No markdown, no commentary.",
             "",
             "Tagging rules:",
-            "- visibleTags: 6-12 concise user-facing tags. Use specific, reusable design terms, not vague labels.",
-            "- hiddenSearchTags: 15-35 deeper technical/contextual terms for search. Include component taxonomy, layout pattern, hierarchy, spacing density, typography style, interaction pattern, product category, and vibe.",
-            "- summary: one short paragraph describing why this image is useful as design inspiration.",
+            "- kind: exactly one of music, conversation, booking, place, article, design, product, social, document, other.",
+            "- suggestedTitle: a concise human title based only on visible evidence.",
+            "- visibleTags: 4-10 concise reusable user-facing tags.",
+            "- hiddenSearchTags: 10-30 retrieval phrases, including names, locations, dates, categories, topics, and likely future queries.",
+            "- entities: arrays named people, places, dates, prices, artists, songs, brands, and links. Omit unsupported guesses.",
+            "- summary: one short paragraph saying what was saved and why it may be useful.",
             "- confidence: number from 0 to 1.",
             "- Do not create tags that are only raw colors. Color context is provided separately and can inform the summary.",
-            "- Prefer technical names: card grid, split pane, command palette, glassmorphism, dense table, editorial hero, pricing comparison, sidebar navigation, floating toolbar, progressive disclosure, typographic scale, whitespace rhythm.",
+            "- For design captures, include precise component taxonomy and layout terms. For other captures, prioritize factual retrieval over visual style.",
             "",
             "JSON schema:",
-            #"{"visibleTags":["tag"],"hiddenSearchTags":["search term"],"summary":"short paragraph","confidence":0.8}"#,
+            #"{"kind":"place","suggestedTitle":"Kyoto coffee shop","visibleTags":["kyoto","coffee"],"hiddenSearchTags":["quiet cafe in kyoto"],"entities":{"places":["Kyoto"]},"summary":"A cafe worth visiting.","confidence":0.8}"#,
             "",
             "Capture context:",
             "- app: \(capture.appName)",
@@ -336,12 +358,13 @@ struct GeminiVisionTaggingProvider: AITaggingProvider {
     let modelId: String
 
     var providerId: String { "gemini" }
+    var endpointURL: URL { URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):generateContent")! }
 
     func generateTags(for request: AITaggingRequest) async throws -> AITaggingResult {
-        let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):generateContent?key=\(apiKey)")!
-        var urlRequest = URLRequest(url: endpoint)
+        var urlRequest = URLRequest(url: endpointURL)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         urlRequest.timeoutInterval = 45
 
         let payload = GeminiGenerateContentRequest(
@@ -359,11 +382,7 @@ struct GeminiVisionTaggingProvider: AITaggingProvider {
         )
         urlRequest.httpBody = try JSONEncoder().encode(payload)
 
-        let (data, response) = try await URLSession.shared.data(for: urlRequest)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw AITaggingError.requestFailed(body)
-        }
+        let (data, _) = try await performWithRetry(urlRequest)
 
         let apiResponse = try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
         guard let text = apiResponse.candidates.first?.content.parts.compactMap(\.text).joined(),
@@ -371,6 +390,31 @@ struct GeminiVisionTaggingProvider: AITaggingProvider {
             throw AITaggingError.invalidResponse
         }
         return try AITaggingResultParser.parse(resultData)
+    }
+
+    private func performWithRetry(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var attempt = 0
+        while true {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else { return (data, response) }
+                if (200..<300).contains(http.statusCode) { return (data, response) }
+                let retryable = http.statusCode == 429 || (500..<600).contains(http.statusCode)
+                guard retryable, attempt < 2 else {
+                    throw AITaggingError.requestFailed("Gemini request failed with HTTP \(http.statusCode).")
+                }
+                let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+                let delay = retryAfter ?? pow(2, Double(attempt))
+                attempt += 1
+                try await Task.sleep(for: .seconds(delay))
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard attempt < 2, !(error is AITaggingError) else { throw error }
+                attempt += 1
+                try await Task.sleep(for: .seconds(pow(2, Double(attempt - 1))))
+            }
+        }
     }
 }
 
@@ -434,7 +478,10 @@ enum AITaggingResultParser {
             visibleTags: DatabaseManager.normalizedTagNames(result.visibleTags),
             hiddenSearchTags: DatabaseManager.normalizedTagNames(result.hiddenSearchTags),
             summary: result.summary.trimmingCharacters(in: .whitespacesAndNewlines),
-            confidence: min(max(result.confidence.value, 0), 1)
+            confidence: min(max(result.confidence.value, 0), 1),
+            kind: result.kind.flatMap(CaptureKind.init(rawValue:)),
+            suggestedTitle: result.suggestedTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+            entities: result.entities
         )
     }
 
@@ -465,6 +512,9 @@ private struct RawAITaggingResult: Decodable {
     var hiddenSearchTags: [String]
     var summary: String
     var confidence: FlexibleDouble
+    var kind: String?
+    var suggestedTitle: String?
+    var entities: [String: [String]]?
 }
 
 private struct FlexibleDouble: Decodable {
@@ -551,6 +601,17 @@ private indirect enum GeminiResponseSchema: Encodable, Sendable {
             "hiddenSearchTags": .array(.string),
             "summary": .string,
             "confidence": .number
+            , "kind": .string
+            , "suggestedTitle": .string
+            , "entities": .object(
+                properties: [
+                    "people": .array(.string), "places": .array(.string),
+                    "dates": .array(.string), "prices": .array(.string),
+                    "artists": .array(.string), "songs": .array(.string),
+                    "brands": .array(.string), "links": .array(.string)
+                ],
+                required: []
+            )
         ],
         required: ["visibleTags", "hiddenSearchTags", "summary", "confidence"]
     )

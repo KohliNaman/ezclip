@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         BrowserExtensionInstaller.installNativeMessagingManifests()
+        Task.detached(priority: .utility) {
+            await CaptureStorageActor.shared.removeAbandonedTemporaryFiles()
+            await CaptureStorageActor.shared.drainDeletionQueue()
+        }
         setupMenuBar()
 
         // ── Register hotkey ──
@@ -83,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 280, height: 360)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
-            rootView: MenuBarView().environmentObject(menuBarViewModel)
+            rootView: MenuBarView().environment(menuBarViewModel)
         )
     }
 

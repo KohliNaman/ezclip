@@ -213,4 +213,36 @@ final class AITaggingTests: XCTestCase {
         XCTAssertEqual(encoded.mimeType, "image/jpeg")
         XCTAssertLessThan(encoded.data.count, png.count)
     }
+
+    func testLocalClassifierRecognizesHoardingDomains() {
+        let base = Capture(
+            id: UUID(), timestamp: Date(), appName: "Safari", appBundleId: "com.apple.Safari",
+            windowTitle: "Saved", screenshotPath: "/tmp/a.png", thumbnailPath: "/tmp/a-thumb.jpg",
+            contextType: .generic, notes: nil, collectionId: nil,
+            isScrolling: false, scrollIndex: nil, parentCaptureId: nil
+        )
+        XCTAssertEqual(LocalCaptureClassifier.classify(capture: base, text: "Booking confirmed Check-in 12 July Hotel Kyoto"), .booking)
+        XCTAssertEqual(LocalCaptureClassifier.classify(capture: base, text: "Add to cart $220 In stock"), .product)
+        XCTAssertEqual(LocalCaptureClassifier.classify(capture: base, text: "Spotify playlist Song album"), .music)
+        XCTAssertEqual(LocalCaptureClassifier.classify(capture: base, text: "iMessage replied to you"), .conversation)
+    }
+
+    func testGeminiAPIKeyIsNotEmbeddedInEndpointURL() {
+        let provider = GeminiVisionTaggingProvider(apiKey: "secret", modelId: "test-model")
+        XCTAssertNil(provider.endpointURL.query)
+        XCTAssertFalse(provider.endpointURL.absoluteString.contains("secret"))
+    }
+
+    func testPromptUsesPersonalRetrievalTaxonomy() {
+        let capture = Capture(
+            id: UUID(), timestamp: Date(), appName: "Messages", appBundleId: "com.apple.MobileSMS",
+            windowTitle: "Weekend plans", screenshotPath: "/tmp/a.png", thumbnailPath: "/tmp/b.jpg",
+            contextType: .generic, notes: nil, collectionId: nil,
+            isScrolling: false, scrollIndex: nil, parentCaptureId: nil
+        )
+        let prompt = AITaggingPromptBuilder.prompt(for: capture)
+        XCTAssertTrue(prompt.contains("conversation"))
+        XCTAssertTrue(prompt.contains("booking"))
+        XCTAssertTrue(prompt.contains("personal visual memory"))
+    }
 }

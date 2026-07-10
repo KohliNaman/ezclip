@@ -9,6 +9,8 @@ struct Capture: Identifiable, Codable, @unchecked Sendable {
     var windowTitle: String
     var screenshotPath: String
     var thumbnailPath: String
+    var contentHash: String? = nil
+    var storageStatus: String? = "ready"
     var contextType: ContextType
 
     // Website context
@@ -67,9 +69,7 @@ struct Capture: Identifiable, Codable, @unchecked Sendable {
     }
 
     var displayDate: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: timestamp, relativeTo: Date())
+        timestamp.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated))
     }
 }
 
@@ -84,6 +84,8 @@ extension Capture: TableRecord, FetchableRecord, MutablePersistableRecord {
         static let collectionId = Column(CodingKeys.collectionId)
         static let contextStatus = Column(CodingKeys.contextStatus)
         static let designContextStatus = Column(CodingKeys.designContextStatus)
+        static let contentHash = Column(CodingKeys.contentHash)
+        static let storageStatus = Column(CodingKeys.storageStatus)
     }
 }
 

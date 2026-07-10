@@ -1,5 +1,6 @@
 @preconcurrency import AppKit
 import Foundation
+import OSLog
 @preconcurrency import UserNotifications
 
 @MainActor
@@ -14,14 +15,30 @@ final class CapturePipeline {
     private init() {}
 
     func capture() async {
+        let captureState = CaptureMetrics.signposter.beginInterval("Capture")
+        defer { CaptureMetrics.signposter.endInterval("Capture", captureState) }
         CaptureOverlay.shared.showCapturing()
 
         do {
-            let (image, windowInfo) = try await captureManager.captureFrontmostWindow()
+            let acquisition = CaptureMetrics.signposter.beginInterval("WindowAcquisition")
+            let (cgImage, windowInfo) = try await captureManager.captureFrontmostWindow()
+            CaptureMetrics.signposter.endInterval("WindowAcquisition", acquisition)
+            let image = NSImage(cgImage: cgImage, size: windowInfo.size)
             CaptureOverlay.shared.showCapturing(appName: windowInfo.appName, bundleId: windowInfo.bundleId)
 
             let captureId = UUID()
-            let (fullPath, thumbPath) = try storage.saveScreenshot(image, captureId: captureId)
+            let encoding = CaptureMetrics.signposter.beginInterval("ImageEncode")
+            let files = try await CaptureStorageActor.shared.saveScreenshot(cgImage, captureId: captureId)
+            CaptureMetrics.signposter.endInterval("ImageEncode", encoding)
+            if let duplicate = try await DatabaseManager.shared.capture(withContentHash: files.contentHash) {
+                await CaptureStorageActor.shared.discard(files)
+                CaptureOverlay.shared.showSaved(
+                    thumbnail: ImageStorageManager.shared.thumbnailImage(for: duplicate),
+                    appName: duplicate.appName,
+                    bundleId: duplicate.appBundleId
+                )
+                return
+            }
 
             var capture = Capture(
                 id: captureId,
@@ -29,8 +46,10 @@ final class CapturePipeline {
                 appName: windowInfo.appName,
                 appBundleId: windowInfo.bundleId,
                 windowTitle: windowInfo.windowTitle,
-                screenshotPath: fullPath,
-                thumbnailPath: thumbPath,
+                screenshotPath: files.fullPath,
+                thumbnailPath: files.thumbnailPath,
+                contentHash: files.contentHash,
+                storageStatus: "ready",
                 contextType: .generic,
                 notes: nil,
                 collectionId: nil,
@@ -40,10 +59,12 @@ final class CapturePipeline {
             )
             capture.contextStatus = "pending"
 
+            let persistence = CaptureMetrics.signposter.beginInterval("DurableInsert")
             try await repository.insert(capture)
+            CaptureMetrics.signposter.endInterval("DurableInsert", persistence)
             NotificationCenter.default.post(name: .newCaptureCreated, object: capture)
             CaptureOverlay.shared.showSaved(
-                thumbnail: NSImage(contentsOfFile: thumbPath),
+                thumbnail: image,
                 appName: windowInfo.appName,
                 bundleId: windowInfo.bundleId
             )
@@ -54,6 +75,9 @@ final class CapturePipeline {
 
             Task { @MainActor in
                 await resolveContext(for: capture, windowInfo: windowInfo)
+            }
+            Task.detached(priority: .utility) {
+                await LocalCaptureAnalysisService.shared.analyze(capture)
             }
 
             print("📸 Captured shell: \(windowInfo.appName) — \(windowInfo.windowTitle)")
@@ -68,12 +92,21 @@ final class CapturePipeline {
     }
 
     private func resolveContext(for capture: Capture, windowInfo: WindowInfo) async {
+        let state = CaptureMetrics.signposter.beginInterval("ContextResolution")
+        defer { CaptureMetrics.signposter.endInterval("ContextResolution", state) }
         let context = await contextEngine.resolve(
             bundleId: windowInfo.bundleId,
             windowTitle: windowInfo.windowTitle
         )
         var enrichedContext = context
         if enrichedContext.contextType == .website {
+            if let authoritative = BrowserDesignContextStore.authoritativeContext(
+                matchingWindowTitle: windowInfo.windowTitle,
+                bundleId: windowInfo.bundleId
+            ), let url = authoritative.url {
+                enrichedContext.url = url
+                enrichedContext.pageTitle = authoritative.title ?? enrichedContext.pageTitle
+            }
             let designMatch = BrowserDesignContextStore.latestMatch(
                 matching: enrichedContext.url,
                 bundleId: windowInfo.bundleId
@@ -158,4 +191,8 @@ final class CapturePipeline {
         )
     }
 
+}
+
+private extension WindowInfo {
+    var size: NSSize { NSSize(width: width, height: height) }
 }
